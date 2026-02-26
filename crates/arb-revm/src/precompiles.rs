@@ -22,7 +22,12 @@
 //     spec: OpSpecId,
 // }
 
-use revm::handler::EthPrecompiles;
+use std::sync::OnceLock;
+
+use revm::{
+    handler::EthPrecompiles,
+    precompile::{Precompiles, secp256r1},
+};
 
 use crate::spec::ArbSpecId;
 
@@ -70,6 +75,37 @@ pub struct ArbPrecompiles {
 //     }
 // }
 
+// // process Ethereum precompiles for respective arbos versions
+//  addPrecompiles(vm.PrecompiledContractsBeforeArbOS30, vm.PrecompiledContractsBerlin)
+//  addPrecompiles(vm.PrecompiledContractsStartingFromArbOS30, vm.PrecompiledContractsCancun)
+//  addPrecompiles(vm.PrecompiledContractsStartingFromArbOS30, vm.PrecompiledContractsP256Verify)
+//  addPrecompiles(vm.PrecompiledContractsStartingFromArbOS50, vm.PrecompiledContractsOsaka)
+
+pub fn arbitrum() -> &'static Precompiles {
+    static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let precompiles = Precompiles::berlin().clone();
+        precompiles
+    })
+}
+
+pub fn stylus() -> &'static Precompiles {
+    static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let mut precompiles = Precompiles::cancun().clone();
+        // RIP-7212: secp256r1 P256verify
+        precompiles.extend([secp256r1::P256VERIFY]);
+        precompiles
+    })
+}
+
+pub fn dia() -> &'static Precompiles {
+    static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let precompiles = Precompiles::osaka().clone();
+        precompiles
+    })
+}
 // /// Returns precompiles for Fjord spec.
 // pub fn fjord() -> &'static Precompiles {
 //     static INSTANCE: OnceLock<Precompiles> = OnceLock::new();
