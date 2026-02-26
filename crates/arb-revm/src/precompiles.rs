@@ -32,6 +32,13 @@ pub struct ArbPrecompiles {
     spec: ArbSpecId,
 }
 
+// impl ArbPrecompiles {
+//     #[inline]
+//     pub fn new_with_spec() -> Self {
+
+//     }
+// }
+
 // impl OpPrecompiles {
 //     /// Create a new precompile provider with the given OpSpec.
 //     #[inline]
