@@ -1,0 +1,6 @@
+[workspace]
+members = ["crates/arb-reth"]
+resolver = "2"
+
+[workspace.dependencies]
+revm = "34.0.0"
