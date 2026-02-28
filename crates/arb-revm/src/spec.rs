@@ -1,8 +1,27 @@
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ArbSpecId {
     Arbitrum = 100, // BeforeArbOS30
     Stylus,         // StartingFromArbOS30
+    #[default]
     Dia,            // StartingFromArbOS50
+}
+
+impl ArbSpecId {
+    /// Converts the [`ArbSpecId`] into the corresponding Ethereum [`SpecId`].
+    pub const fn into_eth_spec(self) -> revm::primitives::hardfork::SpecId {
+        use revm::primitives::hardfork::SpecId;
+        match self {
+            Self::Arbitrum => SpecId::BERLIN,
+            Self::Stylus => SpecId::CANCUN,
+            Self::Dia => SpecId::OSAKA,
+        }
+    }
+}
+
+impl From<ArbSpecId> for revm::primitives::hardfork::SpecId {
+    fn from(spec: ArbSpecId) -> Self {
+        spec.into_eth_spec()
+    }
 }
 
 

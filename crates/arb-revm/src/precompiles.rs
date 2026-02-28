@@ -25,8 +25,12 @@
 use std::sync::OnceLock;
 
 use revm::{
-    handler::EthPrecompiles,
+    context::Cfg,
+    context_interface::ContextTr,
+    handler::{EthPrecompiles, PrecompileProvider},
+    interpreter::{CallInputs, InterpreterResult},
     precompile::{Precompiles, secp256r1},
+    primitives::Address,
 };
 
 use crate::spec::ArbSpecId;
@@ -37,12 +41,69 @@ pub struct ArbPrecompiles {
     spec: ArbSpecId,
 }
 
-// impl ArbPrecompiles {
-//     #[inline]
-//     pub fn new_with_spec() -> Self {
+impl ArbPrecompiles {
+    #[inline]
+    pub fn new_with_spec(spec: ArbSpecId) -> Self {
+        let precompiles = match spec {
+            ArbSpecId::Arbitrum => arbitrum(),
+            ArbSpecId::Stylus => stylus(),
+            ArbSpecId::Dia => dia(),
+        };
+        Self {
+            inner: EthPrecompiles {
+                precompiles,
+                spec: spec.into(),
+            },
+            spec,
+        }
+    }
 
-//     }
-// }
+    #[inline]
+    pub fn precompiles(&self) -> &'static Precompiles {
+        self.inner.precompiles
+    }
+}
+
+impl<CTX> PrecompileProvider<CTX> for ArbPrecompiles
+where
+    CTX: ContextTr<Cfg: Cfg<Spec = ArbSpecId>>,
+{
+    type Output = InterpreterResult;
+
+    #[inline]
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
+        if spec == self.spec {
+            return false;
+        }
+        *self = Self::new_with_spec(spec);
+        true
+    }
+
+    #[inline]
+    fn run(
+        &mut self,
+        context: &mut CTX,
+        inputs: &CallInputs,
+    ) -> Result<Option<Self::Output>, String> {
+        self.inner.run(context, inputs)
+    }
+
+    #[inline]
+    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
+        self.inner.warm_addresses()
+    }
+
+    #[inline]
+    fn contains(&self, address: &Address) -> bool {
+        self.inner.contains(address)
+    }
+}
+
+impl Default for ArbPrecompiles {
+    fn default() -> Self {
+        Self::new_with_spec(ArbSpecId::Dia)
+    }
+}
 
 // impl OpPrecompiles {
 //     /// Create a new precompile provider with the given OpSpec.
