@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 revm.workspace = true
+alloy-sol-types.workspace = true

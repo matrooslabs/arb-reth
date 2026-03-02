@@ -4,3 +4,4 @@ resolver = "2"
 
 [workspace.dependencies]
 revm = "34.0.0"
+alloy-sol-types = "1.5.7"
