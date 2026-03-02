@@ -3,13 +3,14 @@
 //!
 //! Precompile address: 0x0000000000000000000000000000000000000064
 
-use std::sync::OnceLock;
-
 use revm::{
     context_interface::{Block, Cfg, ContextTr, JournalTr},
     precompile::{PrecompileError, PrecompileOutput, PrecompileResult},
-    primitives::{keccak256, Address, Bytes, B256, U256},
+    primitives::{Address, Bytes, B256, U256},
 };
+
+use alloy_sol_types::SolCall;
+use crate::arb_precompiles::contracts::ArbSys;
 
 /// ArbSys precompile address (0x64).
 pub const ADDRESS: Address = Address::new([
@@ -49,51 +50,6 @@ pub fn undo_l1_to_l2_alias(addr: Address) -> Address {
         borrow = if diff < 0 { 1 } else { 0 };
     }
     Address::new(bytes)
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Function selectors
-// ────────────────────────────────────────────────────────────────────────────
-
-fn make_selector(sig: &str) -> [u8; 4] {
-    let h = keccak256(sig.as_bytes());
-    [h[0], h[1], h[2], h[3]]
-}
-
-struct Selectors {
-    arb_block_number: [u8; 4],
-    arb_block_hash: [u8; 4],
-    arb_chain_id: [u8; 4],
-    arb_os_version: [u8; 4],
-    get_storage_gas_available: [u8; 4],
-    is_top_level_call: [u8; 4],
-    map_l1_sender_to_l2_alias: [u8; 4],
-    was_my_callers_aliased: [u8; 4],
-    my_callers_without_aliasing: [u8; 4],
-    send_tx_to_l1: [u8; 4],
-    send_merkle_tree_state: [u8; 4],
-    withdraw_eth: [u8; 4],
-}
-
-static SELECTORS: OnceLock<Selectors> = OnceLock::new();
-
-fn selectors() -> &'static Selectors {
-    SELECTORS.get_or_init(|| Selectors {
-        arb_block_number: make_selector("arbBlockNumber()"),
-        arb_block_hash: make_selector("arbBlockHash(uint256)"),
-        arb_chain_id: make_selector("arbChainID()"),
-        arb_os_version: make_selector("arbOSVersion()"),
-        get_storage_gas_available: make_selector("getStorageGasAvailable()"),
-        is_top_level_call: make_selector("isTopLevelCall()"),
-        map_l1_sender_to_l2_alias: make_selector(
-            "mapL1SenderContractAddressToL2Alias(address,address)",
-        ),
-        was_my_callers_aliased: make_selector("wasMyCallersAddressAliased()"),
-        my_callers_without_aliasing: make_selector("myCallersAddressWithoutAliasing()"),
-        send_tx_to_l1: make_selector("sendTxToL1(address,bytes)"),
-        send_merkle_tree_state: make_selector("sendMerkleTreeState()"),
-        withdraw_eth: make_selector("withdrawEth(address)"),
-    })
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -155,31 +111,30 @@ pub fn run<CTX: ContextTr>(ctx: &mut CTX, input: &[u8], gas_limit: u64) -> Preco
     }
     let (sel_bytes, args) = input.split_at(4);
     let sel: [u8; 4] = sel_bytes.try_into().unwrap();
-    let s = selectors();
 
-    if sel == s.arb_block_number {
+    if sel == ArbSys::arbBlockNumberCall::SELECTOR {
         arb_block_number(ctx, gas_limit)
-    } else if sel == s.arb_block_hash {
+    } else if sel == ArbSys::arbBlockHashCall::SELECTOR {
         arb_block_hash(ctx, args, gas_limit)
-    } else if sel == s.arb_chain_id {
+    } else if sel == ArbSys::arbChainIDCall::SELECTOR {
         arb_chain_id(ctx, gas_limit)
-    } else if sel == s.arb_os_version {
+    } else if sel == ArbSys::arbOSVersionCall::SELECTOR {
         arb_os_version(gas_limit)
-    } else if sel == s.get_storage_gas_available {
+    } else if sel == ArbSys::getStorageGasAvailableCall::SELECTOR {
         get_storage_gas_available(gas_limit)
-    } else if sel == s.is_top_level_call {
+    } else if sel == ArbSys::isTopLevelCallCall::SELECTOR {
         is_top_level_call(ctx, gas_limit)
-    } else if sel == s.map_l1_sender_to_l2_alias {
+    } else if sel == ArbSys::mapL1SenderContractAddressToL2AliasCall::SELECTOR {
         map_l1_sender_to_l2_alias(args, gas_limit)
-    } else if sel == s.was_my_callers_aliased {
+    } else if sel == ArbSys::wasMyCallersAddressAliasedCall::SELECTOR {
         was_my_callers_aliased()
-    } else if sel == s.my_callers_without_aliasing {
+    } else if sel == ArbSys::myCallersAddressWithoutAliasingCall::SELECTOR {
         my_callers_without_aliasing()
-    } else if sel == s.send_tx_to_l1 {
+    } else if sel == ArbSys::sendTxToL1Call::SELECTOR {
         send_tx_to_l1(ctx, args, gas_limit)
-    } else if sel == s.send_merkle_tree_state {
+    } else if sel == ArbSys::sendMerkleTreeStateCall::SELECTOR {
         send_merkle_tree_state()
-    } else if sel == s.withdraw_eth {
+    } else if sel == ArbSys::withdrawEthCall::SELECTOR {
         withdraw_eth(ctx, args, gas_limit)
     } else {
         Err(PrecompileError::Other("unknown selector".into()))
