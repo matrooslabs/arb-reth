@@ -50,6 +50,14 @@
 // // at location keccak256(storageKey, key) in the flat KVS. Two slots, whether in the same or different storage spaces,
 // // cannot occupy the same location because that would imply a collision in keccak256.
 
+use revm::{
+    Database,
+    context_interface::{ContextTr, JournalTr},
+    primitives::{Address, StorageKey, StorageValue},
+};
+
+use crate::arbos::burn::Burner;
+
 // type Storage struct {
 // 	account    common.Address
 // 	db         vm.StateDB
@@ -390,14 +398,6 @@
 // 	burner  burn.Burner
 // }
 
-use revm::{
-    Database,
-    context_interface::{ContextTr, JournalTr},
-    primitives::{Address, StorageKey, StorageValue},
-};
-
-use crate::arbos::burn::Burner;
-
 /// A single EVM storage slot belonging to `account` at mapped key `slot`.
 ///
 /// The database handle is **not** stored here; instead it is passed at each
@@ -411,7 +411,11 @@ pub struct StorageSlot<B: Burner> {
 
 impl<B: Burner> StorageSlot<B> {
     pub fn new(account: Address, slot: StorageKey, burner: B) -> Self {
-        Self { account, slot, burner }
+        Self {
+            account,
+            slot,
+            burner,
+        }
     }
 
     /// Reads the raw slot value from the backing database.
@@ -437,7 +441,9 @@ impl<B: Burner> StorageSlot<B> {
         // TODO: burner logic — guard with self.burner.read_only(), charge write_cost(value) via
         //       self.burner.burn(ResourceKindStorageAccess, cost), and record
         //       self.burner.tracing_info().record_storage_set(self.slot, value) if tracing is enabled.
-        ctx.journal_mut().sstore(self.account, self.slot, value).map(|_| ())
+        ctx.journal_mut()
+            .sstore(self.account, self.slot, value)
+            .map(|_| ())
     }
 }
 
@@ -691,6 +697,7 @@ impl<B: Burner> StorageSlot<B> {
 // var twoToThe255 = new(big.Int).Lsh(common.Big1, 255)
 // var twoToThe255MinusOne = new(big.Int).Sub(twoToThe255, common.Big1)
 
+pub struct StorageBackedBigUint<B: Burner>(StorageSlot<B>);
 // type StorageBackedBigUint struct {
 // 	StorageSlot
 // }
