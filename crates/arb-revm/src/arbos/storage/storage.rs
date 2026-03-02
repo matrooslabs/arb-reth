@@ -390,12 +390,55 @@
 // 	burner  burn.Burner
 // }
 
-use revm::{Database, primitives::{Address, StorageKey}};
+use revm::{
+    Database,
+    context_interface::{ContextTr, JournalTr},
+    primitives::{Address, StorageKey, StorageValue},
+};
 
-pub struct StorageSlot<Db: Database> {
+use crate::arbos::burn::Burner;
+
+/// A single EVM storage slot belonging to `account` at mapped key `slot`.
+///
+/// The database handle is **not** stored here; instead it is passed at each
+/// call site (Option B). This mirrors how revm itself threads context through
+/// calls rather than storing it in sub-objects.
+pub struct StorageSlot<B: Burner> {
     account: Address,
-    db: Db,
-    slot: StorageKey
+    slot: StorageKey,
+    burner: B,
+}
+
+impl<B: Burner> StorageSlot<B> {
+    pub fn new(account: Address, slot: StorageKey, burner: B) -> Self {
+        Self { account, slot, burner }
+    }
+
+    /// Reads the raw slot value from the backing database.
+    ///
+    /// Maps to Go's `StorageSlot.Get` — uses the read-only `Database` trait
+    /// so this can be called without a full EVM context.
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<StorageValue, Db::Error> {
+        // TODO: burner logic — charge StorageReadCost via self.burner.burn(ResourceKindStorageAccess, STORAGE_READ_COST)
+        //       and record self.burner.tracing_info().record_storage_get(self.slot) if tracing is enabled.
+        db.storage(self.account, self.slot)
+    }
+
+    /// Writes a value through the EVM journal so the change is tracked for
+    /// reverts, warming, and dirty-slot accounting.
+    ///
+    /// Maps to Go's `StorageSlot.Set` — requires a mutable EVM context
+    /// because all writes must go through `Journal::sstore`.
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        value: StorageValue,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        // TODO: burner logic — guard with self.burner.read_only(), charge write_cost(value) via
+        //       self.burner.burn(ResourceKindStorageAccess, cost), and record
+        //       self.burner.tracing_info().record_storage_set(self.slot, value) if tracing is enabled.
+        ctx.journal_mut().sstore(self.account, self.slot, value).map(|_| ())
+    }
 }
 
 // func (s *Storage) NewSlot(offset uint64) StorageSlot {
@@ -747,6 +790,8 @@ pub struct StorageSlot<Db: Database> {
 // type StorageBackedAddress struct {
 // 	StorageSlot
 // }
+
+pub struct StorageBackedAddress<B: Burner>(StorageSlot<B>);
 
 // func (s *Storage) OpenStorageBackedAddress(offset uint64) StorageBackedAddress {
 // 	return StorageBackedAddress{s.NewSlot(offset)}

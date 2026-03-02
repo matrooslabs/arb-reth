@@ -24,6 +24,8 @@
 // 	TracingInfo() *util.TracingInfo
 // }
 
+pub trait Burner {}
+
 // type SystemBurner struct {
 // 	gasBurnt    multigas.MultiGas
 // 	tracingInfo *util.TracingInfo
