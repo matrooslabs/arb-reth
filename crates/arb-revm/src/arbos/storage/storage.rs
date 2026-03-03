@@ -487,6 +487,34 @@ impl<B: Burner> StorageSlot<B> {
 // 	StorageSlot
 // }
 
+pub struct StorageBackedInt64<B: Burner>(StorageSlot<B>);
+
+impl<B: Burner> StorageBackedInt64<B> {
+    /// Reads the stored value and reinterprets its low 64 bits as `i64`.
+    ///
+    /// Maps to Go's `StorageBackedInt64.Get`. The value is stored as its
+    /// two's-complement `uint64` bit pattern (see implementation note in the
+    /// Go source: casting between `uint64` and `int64` reinterprets the same
+    /// 8 bytes without changing them).
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<i64, Db::Error> {
+        let raw = self.0.get(db)?;
+        let as_u64 = u64::try_from(raw)
+            .unwrap_or_else(|_| panic!("invalid value found in StorageBackedInt64 storage"));
+        Ok(as_u64 as i64)
+    }
+
+    /// Writes `value` by reinterpreting its bits as `u64` before storing.
+    ///
+    /// Maps to Go's `StorageBackedInt64.Set`.
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        value: i64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, StorageValue::from(value as u64))
+    }
+}
+
 // func (s *Storage) OpenStorageBackedInt64(offset uint64) StorageBackedInt64 {
 // 	return StorageBackedInt64{s.NewSlot(offset)}
 // }
@@ -608,6 +636,8 @@ impl<B: Burner> StorageSlot<B> {
 // func (sbu *StorageBackedUint32) Clear() error {
 // 	return sbu.Set(0)
 // }
+
+pub struct StorageBackedUint64<B: Burner>(StorageSlot<B>);
 
 // type StorageBackedUint64 struct {
 // 	StorageSlot
@@ -737,6 +767,8 @@ pub struct StorageBackedBigUint<B: Burner>(StorageSlot<B>);
 // 	return sbbu.StorageSlot.Set(common.BytesToHash(val.Bytes()))
 // }
 
+pub struct StorageBackedBigInt<B: Burner>(StorageSlot<B>);
+
 // type StorageBackedBigInt struct {
 // 	StorageSlot
 // }
@@ -745,6 +777,7 @@ pub struct StorageBackedBigUint<B: Burner>(StorageSlot<B>);
 // 	return StorageBackedBigInt{s.NewSlot(offset)}
 // }
 
+impl<B> StorageBackedBigInt<B> where B: Burner {}
 // func (sbbi *StorageBackedBigInt) Get() (*big.Int, error) {
 // 	asHash, err := sbbi.StorageSlot.Get()
 // 	if err != nil {

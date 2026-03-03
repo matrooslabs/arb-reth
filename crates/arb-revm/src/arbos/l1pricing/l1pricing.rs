@@ -24,13 +24,35 @@
 // 	"github.com/offchainlabs/nitro/util/arbmath"
 // )
 
-use crate::arbos::{burn::Burner, l1pricing::batch_poster::BatchPostersTable, storage::storage::{StorageBackedAddress, StorageBackedBigUint}};
+use crate::arbos::{
+    burn::Burner,
+    l1pricing::batch_poster::BatchPostersTable,
+    storage::storage::{
+        StorageBackedAddress, StorageBackedBigInt, StorageBackedBigUint, StorageBackedInt64,
+        StorageBackedUint64,
+    },
+};
 
 pub struct L1PricingState<B: Burner> {
-
+    // parameters
     batch_poster_table: BatchPostersTable,
     pay_rewards_to: StorageBackedAddress<B>,
     equilibration_units: StorageBackedBigUint<B>,
+    inertia: StorageBackedUint64<B>,
+    per_unit_reward: StorageBackedUint64<B>,
+
+    // variables
+    last_update_time: StorageBackedUint64<B>,
+    funds_due_for_rewards: StorageBackedBigInt<B>,
+    units_since_update: StorageBackedUint64<B>,
+    price_per_unit: StorageBackedBigUint<B>,
+    last_surplus: StorageBackedBigInt<B>,
+    per_batch_gas_cost: StorageBackedInt64<B>,
+    amortized_cost_cap_bips: StorageBackedUint64<B>,
+    l1_fees_available: StorageBackedBigUint<B>,
+    gas_floor_per_token: StorageBackedUint64<B>,
+
+    arbos_version: u64,
 }
 
 // type L1PricingState struct {
