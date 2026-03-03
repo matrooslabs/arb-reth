@@ -639,6 +639,56 @@ impl<B: Burner> StorageBackedInt64<B> {
 
 pub struct StorageBackedUint64<B: Burner>(StorageSlot<B>);
 
+impl<B: Burner> StorageBackedUint64<B> {
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        let raw = self.0.get(db)?;
+        let as_u64 = u64::try_from(raw)
+            .unwrap_or_else(|_| panic!("expected uint64 compatible value in storage"));
+        Ok(as_u64)
+    }
+
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        value: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, StorageValue::from(value))
+    }
+
+    pub fn clear<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set(ctx, 0)
+    }
+
+    pub fn increment<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+    ) -> Result<u64, <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        let old = self.get(ctx.db_mut())?;
+        if old == u64::MAX {
+            panic!("Overflow in StorageBackedUint64::Increment");
+        }
+        let new = old + 1;
+        self.set(ctx, new)?;
+        Ok(new)
+    }
+
+    pub fn decrement<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+    ) -> Result<u64, <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        let old = self.get(ctx.db_mut())?;
+        if old == 0 {
+            panic!("Underflow in StorageBackedUint64::Decrement");
+        }
+        let new = old - 1;
+        self.set(ctx, new)?;
+        Ok(new)
+    }
+}
+
 // type StorageBackedUint64 struct {
 // 	StorageSlot
 // }
