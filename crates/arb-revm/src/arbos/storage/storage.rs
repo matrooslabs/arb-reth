@@ -53,7 +53,7 @@
 use revm::{
     Database,
     context_interface::{ContextTr, JournalTr},
-    primitives::{Address, StorageKey, StorageValue},
+    primitives::{Address, I256, StorageKey, StorageValue, U256, keccak256},
 };
 
 use crate::arbos::burn::Burner;
@@ -778,6 +778,38 @@ impl<B: Burner> StorageBackedUint64<B> {
 // var twoToThe255MinusOne = new(big.Int).Sub(twoToThe255, common.Big1)
 
 pub struct StorageBackedBigUint<B: Burner>(StorageSlot<B>);
+
+impl<B: Burner> StorageBackedBigUint<B> {
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<U256, Db::Error> {
+        self.0.get(db)
+    }
+
+    /// Stores `val`, returning an error via the burner if `val` would underflow
+    /// or overflow. In Go this is guarded against negative values and values
+    /// wider than 256 bits; both are impossible with `U256`, so no runtime
+    /// checks are needed here.
+    pub fn set_checked<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: U256,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, val)
+    }
+
+    /// Stores `val`, saturating to `[0, U256::MAX]` with a warning if the
+    /// value is out of range. With `U256` the range is always satisfied, so
+    /// this is equivalent to `set_checked`. The `name` parameter is kept for
+    /// call-site parity with Go.
+    pub fn set_saturating_with_warning<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: U256,
+        _name: &str,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, val)
+    }
+}
+
 // type StorageBackedBigUint struct {
 // 	StorageSlot
 // }
@@ -827,7 +859,65 @@ pub struct StorageBackedBigInt<B: Burner>(StorageSlot<B>);
 // 	return StorageBackedBigInt{s.NewSlot(offset)}
 // }
 
-impl<B> StorageBackedBigInt<B> where B: Burner {}
+impl<B: Burner> StorageBackedBigInt<B> {
+    /// Reads the stored two's-complement signed 256-bit integer.
+    ///
+    /// Maps to Go's manual bit-255 sign check: `I256::from_raw` interprets the
+    /// raw U256 bit pattern as two's complement, which is identical logic.
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<I256, Db::Error> {
+        let raw = self.0.get(db)?;
+        Ok(I256::from_raw(raw))
+    }
+
+    /// Stores `val`, returning a burner error on under/overflow.
+    ///
+    /// Go guards against `*big.Int` values outside [-2^255, 2^255-1]. `I256`
+    /// is already constrained to that range, so no runtime check is needed.
+    pub fn set_checked<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: I256,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, val.into_raw())
+    }
+
+    /// Stores `val`, saturating to `[I256::MIN, I256::MAX]` with a log warning
+    /// on out-of-range input. `I256` is already constrained to that range, so
+    /// saturation is a no-op. `name` is kept for call-site parity with Go.
+    pub fn set_saturating_with_warning<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: I256,
+        _name: &str,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, val.into_raw())
+    }
+
+    /// Pre-version-7 storage format: stores the unsigned magnitude of `val`
+    /// rather than its two's-complement bit pattern.
+    ///
+    /// Go's `big.Int.Bytes()` returns the absolute value as bytes, so negative
+    /// values were stored as their magnitude (a bug fixed in version 7).
+    /// `I256::unsigned_abs()` replicates that behaviour exactly.
+    pub fn set_pre_version7<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: I256,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, val.unsigned_abs())
+    }
+
+    /// Stores a non-negative value given as a raw `u64`.
+    ///
+    /// Maps to Go's `StorageBackedBigInt.SetByUint`.
+    pub fn set_by_uint<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, StorageValue::from(val))
+    }
+}
 // func (sbbi *StorageBackedBigInt) Get() (*big.Int, error) {
 // 	asHash, err := sbbi.StorageSlot.Get()
 // 	if err != nil {
@@ -883,6 +973,30 @@ impl<B> StorageBackedBigInt<B> where B: Burner {}
 
 pub struct StorageBackedAddress<B: Burner>(StorageSlot<B>);
 
+impl<B: Burner> StorageBackedAddress<B> {
+    /// Reads the address stored in the slot.
+    ///
+    /// Maps to Go's `common.BytesToAddress(value.Bytes())`: the address
+    /// occupies the rightmost 20 bytes of the 32-byte slot (left-padded with
+    /// 12 zero bytes per EVM convention).
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<Address, Db::Error> {
+        let raw = self.0.get(db)?;
+        Ok(Address::from_slice(&raw.to_be_bytes::<32>()[12..]))
+    }
+
+    /// Stores `val` left-padded with 12 zero bytes into the 32-byte slot.
+    ///
+    /// Maps to Go's `util.AddressToHash(val)`. `Address::into_word()` performs
+    /// that same left-padding, producing a 32-byte big-endian value.
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: Address,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, U256::from_be_bytes(val.into_word().0))
+    }
+}
+
 // func (s *Storage) OpenStorageBackedAddress(offset uint64) StorageBackedAddress {
 // 	return StorageBackedAddress{s.NewSlot(offset)}
 // }
@@ -906,6 +1020,48 @@ pub struct StorageBackedAddress<B: Burner>(StorageSlot<B>);
 // 	NilAddressRepresentation = common.BigToHash(new(big.Int).Lsh(big.NewInt(1), 255))
 // }
 
+pub struct StorageBackedAddressOrNil<B: Burner>(StorageSlot<B>);
+
+impl<B: Burner> StorageBackedAddressOrNil<B> {
+    /// Sentinel value representing `None`: `1 << 255`.
+    ///
+    /// This can never be a valid address (addresses occupy only the low 20
+    /// bytes of a slot, leaving the top 12 bytes zero), so it is safe to
+    /// use as a distinct nil marker.
+    ///
+    /// Maps to Go's `NilAddressRepresentation = BigToHash(1 << 255)`.
+    /// In little-endian U256 limbs, bit 255 is the MSB of limb[3].
+    const NIL: U256 = U256::from_limbs([0, 0, 0, 1u64 << 63]);
+
+    /// Returns `None` if the slot holds the nil sentinel, otherwise decodes
+    /// the address from the low 20 bytes.
+    ///
+    /// Maps to Go's `StorageBackedAddressOrNil.Get` which returns `*common.Address`.
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<Option<Address>, Db::Error> {
+        let raw = self.0.get(db)?;
+        if raw == Self::NIL {
+            return Ok(None);
+        }
+        Ok(Some(Address::from_slice(&raw.to_be_bytes::<32>()[12..])))
+    }
+
+    /// Stores `None` as the nil sentinel, or left-pads a `Some` address into
+    /// the slot.
+    ///
+    /// Maps to Go's `StorageBackedAddressOrNil.Set` which accepts `*common.Address`.
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: Option<Address>,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        let raw = match val {
+            None => Self::NIL,
+            Some(addr) => U256::from_be_bytes(addr.into_word().0),
+        };
+        self.0.set(ctx, raw)
+    }
+}
+
 // func (s *Storage) OpenStorageBackedAddressOrNil(offset uint64) StorageBackedAddressOrNil {
 // 	return StorageBackedAddressOrNil{s.NewSlot(offset)}
 // }
@@ -926,6 +1082,164 @@ pub struct StorageBackedAddress<B: Burner>(StorageSlot<B>);
 // 	}
 // 	return sba.StorageSlot.Set(common.BytesToHash(val.Bytes()))
 // }
+
+/// A namespaced multi-slot EVM storage space, the direct analogue of Go's
+/// `Storage` struct. All `StorageBacked*` byte-level types embed this.
+///
+/// Slots are addressed by hashing `storage_key ++ key[0..31]` and preserving
+/// `key[31]` as the last byte (Go's `mapAddress`), so that 256 consecutive
+/// logical slots share a common keccak prefix ("page").
+pub struct Storage<B: Burner> {
+    pub account: Address,
+    /// Pre-computed keccak256 namespace key. Matches Go's `Storage.storageKey`
+    /// after `OpenSubStorage`: `keccak256(parent.storageKey ++ id)`.
+    pub storage_key: Vec<u8>,
+    pub burner: B,
+    // Go's `db vm.StateDB` is intentionally absent: revm threads the database
+    // through each call site rather than storing it, so callers pass `db` or
+    // `ctx` directly to read/write methods.
+    //
+    // Go's `hashCache *lru.Cache[string, []byte]` is not yet implemented.
+    // It memoises `cachedKeccak` results to avoid rehashing the same
+    // `storageKey ++ key[0..31]` inputs on every slot access. A Rust
+    // equivalent would be an `Option<Arc<Mutex<LruCache<[u8; 31], [u8; 31]>>>>`
+    // or similar.
+}
+
+impl<B: Burner> Storage<B> {
+    /// Derives the physical EVM slot for logical slot `offset`.
+    ///
+    /// Maps to Go's `Storage.mapAddress(util.UintToHash(offset))`.
+    pub fn map_address(&self, offset: u64) -> StorageKey {
+        let key_bytes = U256::from(offset).to_be_bytes::<32>();
+        const BOUNDARY: usize = 31;
+        let mut input = Vec::with_capacity(self.storage_key.len() + BOUNDARY);
+        input.extend_from_slice(&self.storage_key);
+        input.extend_from_slice(&key_bytes[..BOUNDARY]);
+        let hash = keccak256(&input);
+        let mut mapped = [0u8; 32];
+        mapped[..BOUNDARY].copy_from_slice(&hash.0[..BOUNDARY]);
+        mapped[BOUNDARY] = key_bytes[BOUNDARY];
+        StorageKey::from_be_bytes(mapped)
+    }
+
+    pub fn read_slot<Db: Database>(&self, db: &mut Db, offset: u64) -> Result<StorageValue, Db::Error> {
+        db.storage(self.account, self.map_address(offset))
+    }
+
+    pub fn write_slot<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        offset: u64,
+        value: StorageValue,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        ctx.journal_mut()
+            .sstore(self.account, self.map_address(offset), value)
+            .map(|_| ())
+    }
+
+    /// Maps to Go's `Storage.GetBytesSize`.
+    pub fn get_bytes_size<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        let raw = self.read_slot(db, 0)?;
+        Ok(u64::try_from(raw)
+            .unwrap_or_else(|_| panic!("invalid byte length in StorageBackedBytes")))
+    }
+
+    /// Maps to Go's `Storage.GetBytes`.
+    pub fn get_bytes<Db: Database>(&self, db: &mut Db) -> Result<Vec<u8>, Db::Error> {
+        let mut bytes_left = self.get_bytes_size(db)?;
+        let mut result = Vec::with_capacity(bytes_left as usize);
+        let mut offset = 1u64;
+        while bytes_left >= 32 {
+            let chunk = self.read_slot(db, offset)?.to_be_bytes::<32>();
+            result.extend_from_slice(&chunk);
+            bytes_left -= 32;
+            offset += 1;
+        }
+        if bytes_left > 0 {
+            let chunk = self.read_slot(db, offset)?.to_be_bytes::<32>();
+            result.extend_from_slice(&chunk[32 - bytes_left as usize..]);
+        }
+        Ok(result)
+    }
+
+    /// Maps to Go's `Storage.ClearBytes`.
+    pub fn clear_bytes<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        let mut bytes_left = {
+            let raw = self.read_slot(ctx.db_mut(), 0)?;
+            u64::try_from(raw)
+                .unwrap_or_else(|_| panic!("invalid byte length in StorageBackedBytes"))
+        };
+        let mut offset = 1u64;
+        while bytes_left > 0 {
+            self.write_slot(ctx, offset, StorageValue::ZERO)?;
+            offset += 1;
+            bytes_left = bytes_left.saturating_sub(32);
+        }
+        self.write_slot(ctx, 0, StorageValue::ZERO)
+    }
+
+    /// Maps to Go's `Storage.SetBytes`.
+    pub fn set_bytes<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        b: &[u8],
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.clear_bytes(ctx)?;
+        self.write_slot(ctx, 0, StorageValue::from(b.len() as u64))?;
+        let mut offset = 1u64;
+        let mut remaining = b;
+        while remaining.len() >= 32 {
+            let value = StorageValue::from_be_bytes::<32>(remaining[..32].try_into().unwrap());
+            self.write_slot(ctx, offset, value)?;
+            remaining = &remaining[32..];
+            offset += 1;
+        }
+        if !remaining.is_empty() {
+            let mut padded = [0u8; 32];
+            padded[32 - remaining.len()..].copy_from_slice(remaining);
+            self.write_slot(ctx, offset, StorageValue::from_be_bytes(padded))?;
+        }
+        Ok(())
+    }
+}
+
+/// Variable-length bytes stored across multiple EVM slots.
+///
+/// Mirrors Go's `StorageBackedBytes` which embeds a full `Storage` (not a
+/// single `StorageSlot`). Layout:
+///   slot 0        : byte length as u64
+///   slots 1..=n   : full 32-byte data chunks
+///   slot n+1      : remaining bytes right-aligned (if length % 32 != 0)
+pub struct StorageBackedBytes<B: Burner>(Storage<B>);
+
+impl<B: Burner> StorageBackedBytes<B> {
+    pub fn size<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        self.0.get_bytes_size(db)
+    }
+
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<Vec<u8>, Db::Error> {
+        self.0.get_bytes(db)
+    }
+
+    pub fn clear<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.clear_bytes(ctx)
+    }
+
+    pub fn set<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        b: &[u8],
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set_bytes(ctx, b)
+    }
+}
 
 // type StorageBackedBytes struct {
 // 	Storage
