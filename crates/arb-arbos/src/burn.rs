@@ -24,13 +24,19 @@
 // 	TracingInfo() *util.TracingInfo
 // }
 
+use core::cell::Cell;
+
 use arbitrum::multigas::resources::{MultiGas, ResourceKind};
 
 use crate::util::util::TracingInfo;
 
 pub trait Burner {
-    fn burn(&mut self, kind: ResourceKind, amount: u64) -> Result<(), String>;
-    fn burn_multi_gas(&mut self, amount: MultiGas) -> Result<(), String>;
+    // `&self` (not `&mut self`) so that callers holding a shared reference (e.g.
+    // `StorageSlot::get`) can still charge gas without needing `&mut self` to
+    // cascade through every read path. Implementors that track mutable state
+    // (e.g. `SystemBurner`) use interior mutability (`Cell`) internally.
+    fn burn(&self, kind: ResourceKind, amount: u64) -> Result<(), String>;
+    fn burn_multi_gas(&self, amount: MultiGas) -> Result<(), String>;
     fn burned(&self) -> u64;
     /// Returns the gas left. `SystemBurner` panics — it has no notion of a gas limit.
     fn gas_left(&self) -> u64;
@@ -43,7 +49,10 @@ pub trait Burner {
 }
 
 pub struct SystemBurner {
-    gas_burnt: MultiGas,
+    // `Cell<MultiGas>` provides interior mutability without `RefCell`'s runtime
+    // borrow-checking overhead. This is safe because `MultiGas: Copy` and
+    // `SystemBurner` is not `Sync` (single-threaded ArbOS execution model).
+    gas_burnt: Cell<MultiGas>,
     tracing_info: Option<TracingInfo>,
     read_only: bool,
 }
@@ -57,7 +66,7 @@ pub struct SystemBurner {
 impl SystemBurner {
     pub fn new(tracing_info: Option<TracingInfo>, read_only: bool) -> Self {
         Self {
-            gas_burnt: MultiGas::default(),
+            gas_burnt: Cell::new(MultiGas::default()),
             tracing_info,
             read_only,
         }
@@ -65,18 +74,22 @@ impl SystemBurner {
 }
 
 impl Burner for SystemBurner {
-    fn burn(&mut self, kind: ResourceKind, amount: u64) -> Result<(), String> {
-        self.gas_burnt.saturating_increment_into(kind, amount);
+    fn burn(&self, kind: ResourceKind, amount: u64) -> Result<(), String> {
+        let mut g = self.gas_burnt.get();
+        g.saturating_increment_into(kind, amount);
+        self.gas_burnt.set(g);
         Ok(())
     }
 
-    fn burn_multi_gas(&mut self, amount: MultiGas) -> Result<(), String> {
-        self.gas_burnt.saturating_add_into(&amount);
+    fn burn_multi_gas(&self, amount: MultiGas) -> Result<(), String> {
+        let mut g = self.gas_burnt.get();
+        g.saturating_add_into(&amount);
+        self.gas_burnt.set(g);
         Ok(())
     }
 
     fn burned(&self) -> u64 {
-        self.gas_burnt.single_gas()
+        self.gas_burnt.get().single_gas()
     }
 
     fn gas_left(&self) -> u64 {

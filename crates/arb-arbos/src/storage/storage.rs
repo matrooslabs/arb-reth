@@ -53,10 +53,33 @@
 use revm::{
     Database,
     context_interface::{ContextTr, JournalTr},
-    primitives::{Address, I256, StorageKey, StorageValue, U256, keccak256},
+    primitives::{Address, B256, I256, StorageKey, StorageValue, U256, keccak256},
 };
 
+use arbitrum::multigas::resources::ResourceKind;
+
 use crate::burn::Burner;
+use crate::util::util::TracingScenario;
+
+// Gas costs mirror go-ethereum's EIP-2200 constants referenced by the Go source:
+//   const StorageReadCost      = params.SloadGasEIP2200       // 800
+//   const StorageWriteCost     = params.SstoreSetGasEIP2200   // 20_000
+//   const StorageWriteZeroCost = params.SstoreResetGasEIP2200 //  2_900
+const STORAGE_READ_COST: u64 = 800;
+const STORAGE_WRITE_COST: u64 = 20_000;
+const STORAGE_WRITE_ZERO_COST: u64 = 2_900;
+
+/// Returns the write cost for a storage slot.
+///
+/// Writing zero (deleting a slot) is cheaper than writing a non-zero value.
+/// Maps to Go's `writeCost`.
+fn write_cost(value: StorageValue) -> u64 {
+    if value.is_zero() {
+        STORAGE_WRITE_ZERO_COST
+    } else {
+        STORAGE_WRITE_COST
+    }
+}
 
 // type Storage struct {
 // 	account    common.Address
@@ -423,8 +446,24 @@ impl<B: Burner> StorageSlot<B> {
     /// Maps to Go's `StorageSlot.Get` — uses the read-only `Database` trait
     /// so this can be called without a full EVM context.
     pub fn get<Db: Database>(&self, db: &mut Db) -> Result<StorageValue, Db::Error> {
-        // TODO: burner logic — charge StorageReadCost via self.burner.burn(ResourceKindStorageAccess, STORAGE_READ_COST)
-        //       and record self.burner.tracing_info().record_storage_get(self.slot) if tracing is enabled.
+        // Charge gas. SystemBurner never returns Err; a user-facing burner with a
+        // gas limit would return Err here and callers would propagate it. For now
+        // we use `let _ =` because the return type is Db::Error and unifying the
+        // two error kinds would require a combined error enum (not yet needed).
+        let _ = self.burner.burn(ResourceKind::StorageAccess, STORAGE_READ_COST);
+
+        // Notify the tracer, mirroring Go's `info.RecordStorageGet(ss.slot)`.
+        // StorageKey is U256 in revm; convert to B256 (big-endian bytes) for the tracer.
+        if let Some(info) = self.burner.tracing_info() {
+            if let Some(tracer) = &info.tracer {
+                tracer.capture_storage_get(
+                    B256::from(self.slot.to_be_bytes::<32>()),
+                    info.depth,
+                    info.scenario == TracingScenario::BeforeEVM,
+                );
+            }
+        }
+
         db.storage(self.account, self.slot)
     }
 
@@ -438,9 +477,27 @@ impl<B: Burner> StorageSlot<B> {
         ctx: &mut CTX,
         value: StorageValue,
     ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
-        // TODO: burner logic — guard with self.burner.read_only(), charge write_cost(value) via
-        //       self.burner.burn(ResourceKindStorageAccess, cost), and record
-        //       self.burner.tracing_info().record_storage_set(self.slot, value) if tracing is enabled.
+        // Guard against writes through a read-only burner (mirrors Go's ErrWriteProtection check).
+        if self.burner.read_only() {
+            panic!("read-only burner attempted to mutate state");
+        }
+
+        // Charge gas — zero writes are cheaper (slot deletion vs. slot update).
+        let _ = self.burner.burn(ResourceKind::StorageAccess, write_cost(value));
+
+        // Notify the tracer, mirroring Go's `info.RecordStorageSet(ss.slot, value)`.
+        // Both StorageKey and StorageValue are U256 in revm; convert to B256 for the tracer.
+        if let Some(info) = self.burner.tracing_info() {
+            if let Some(tracer) = &info.tracer {
+                tracer.capture_storage_set(
+                    B256::from(self.slot.to_be_bytes::<32>()),
+                    B256::from(value.to_be_bytes::<32>()),
+                    info.depth,
+                    info.scenario == TracingScenario::BeforeEVM,
+                );
+            }
+        }
+
         ctx.journal_mut()
             .sstore(self.account, self.slot, value)
             .map(|_| ())
