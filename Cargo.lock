@@ -253,6 +253,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "arb-arbos"
+version = "0.1.0"
+dependencies = [
+ "revm",
+]
+
+[[package]]
 name = "arb-reth"
 version = "0.1.0"
 
@@ -261,8 +268,13 @@ name = "arb-revm"
 version = "0.1.0"
 dependencies = [
  "alloy-sol-types",
+ "arb-arbos",
  "revm",
 ]
+
+[[package]]
+name = "arbitrum"
+version = "0.1.0"
 
 [[package]]
 name = "ark-bls12-381"

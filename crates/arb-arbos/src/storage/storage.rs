@@ -56,7 +56,7 @@ use revm::{
     primitives::{Address, I256, StorageKey, StorageValue, U256, keccak256},
 };
 
-use crate::arbos::burn::Burner;
+use crate::burn::Burner;
 
 // type Storage struct {
 // 	account    common.Address
@@ -533,6 +533,131 @@ impl<B: Burner> StorageBackedInt64<B> {
 // 	return sbu.StorageSlot.Set(util.UintToHash(uint64(value))) // see implementation note above
 // }
 
+/// Signed basis points. Maps to Go's `arbmath.Bips`.
+pub type Bips = i64;
+
+/// Unsigned basis points. Maps to Go's `arbmath.UBips`.
+pub type UBips = u64;
+
+/// A 24-bit unsigned integer (0–16_777_215). Maps to Go's `arbmath.Uint24`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Uint24(u32);
+
+impl Uint24 {
+    pub const MAX: u32 = 0x00FF_FFFF;
+
+    /// Constructs a `Uint24`, panicking if `value > Uint24::MAX`.
+    pub fn new(value: u32) -> Self {
+        assert!(value <= Self::MAX, "value exceeds 24-bit range: {value}");
+        Self(value)
+    }
+
+    pub fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// Signed basis-points storage. Wraps [`StorageBackedInt64`].
+///
+/// Maps to Go's `StorageBackedBips`.
+pub struct StorageBackedBips<B: Burner>(StorageBackedInt64<B>);
+
+impl<B: Burner> StorageBackedBips<B> {
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<Bips, Db::Error> {
+        self.0.get(db)
+    }
+
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        value: Bips,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, value)
+    }
+}
+
+/// 16-bit unsigned integer storage.
+///
+/// Maps to Go's `StorageBackedUint16`.
+pub struct StorageBackedUint16<B: Burner>(StorageSlot<B>);
+
+impl<B: Burner> StorageBackedUint16<B> {
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<u16, Db::Error> {
+        let raw = self.0.get(db)?;
+        let as_u64 = u64::try_from(raw)
+            .unwrap_or_else(|_| panic!("expected uint16 compatible value in storage"));
+        if as_u64 > u16::MAX as u64 {
+            panic!("expected uint16 compatible value in storage");
+        }
+        Ok(as_u64 as u16)
+    }
+
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        value: u16,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, StorageValue::from(value as u64))
+    }
+}
+
+/// 24-bit unsigned integer storage.
+///
+/// Maps to Go's `StorageBackedUint24`.
+pub struct StorageBackedUint24<B: Burner>(StorageSlot<B>);
+
+impl<B: Burner> StorageBackedUint24<B> {
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<Uint24, Db::Error> {
+        let raw = self.0.get(db)?;
+        let as_u64 = u64::try_from(raw)
+            .unwrap_or_else(|_| panic!("expected uint24 compatible value in storage"));
+        if as_u64 > Uint24::MAX as u64 {
+            panic!("expected uint24 compatible value in storage");
+        }
+        Ok(Uint24(as_u64 as u32))
+    }
+
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        value: Uint24,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, StorageValue::from(value.0 as u64))
+    }
+}
+
+/// 32-bit unsigned integer storage.
+///
+/// Maps to Go's `StorageBackedUint32`.
+pub struct StorageBackedUint32<B: Burner>(StorageSlot<B>);
+
+impl<B: Burner> StorageBackedUint32<B> {
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<u32, Db::Error> {
+        let raw = self.0.get(db)?;
+        let as_u64 = u64::try_from(raw)
+            .unwrap_or_else(|_| panic!("expected uint32 compatible value in storage"));
+        if as_u64 > u32::MAX as u64 {
+            panic!("expected uint32 compatible value in storage");
+        }
+        Ok(as_u64 as u32)
+    }
+
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        value: u32,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, StorageValue::from(value as u64))
+    }
+
+    pub fn clear<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set(ctx, 0)
+    }
+}
+
 // // StorageBackedBips represents a number of basis points
 // type StorageBackedBips struct {
 // 	backing StorageBackedInt64
@@ -686,6 +811,25 @@ impl<B: Burner> StorageBackedUint64<B> {
         let new = old - 1;
         self.set(ctx, new)?;
         Ok(new)
+    }
+}
+
+/// Unsigned basis-points storage. Wraps [`StorageBackedUint64`].
+///
+/// Maps to Go's `StorageBackedUBips`.
+pub struct StorageBackedUBips<B: Burner>(StorageBackedUint64<B>);
+
+impl<B: Burner> StorageBackedUBips<B> {
+    pub fn get<Db: Database>(&self, db: &mut Db) -> Result<UBips, Db::Error> {
+        self.0.get(db)
+    }
+
+    pub fn set<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        value: UBips,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.0.set(ctx, value)
     }
 }
 
@@ -1136,6 +1280,191 @@ impl<B: Burner> Storage<B> {
         ctx.journal_mut()
             .sstore(self.account, self.map_address(offset), value)
             .map(|_| ())
+    }
+
+    /// General form of `map_address` that accepts an arbitrary 32-byte key.
+    ///
+    /// Maps to Go's `Storage.mapAddress(key common.Hash)`.
+    pub fn map_address_by_key(&self, key: StorageKey) -> StorageKey {
+        let key_bytes = key.to_be_bytes::<32>();
+        const BOUNDARY: usize = 31;
+        let mut input = Vec::with_capacity(self.storage_key.len() + BOUNDARY);
+        input.extend_from_slice(&self.storage_key);
+        input.extend_from_slice(&key_bytes[..BOUNDARY]);
+        let hash = keccak256(&input);
+        let mut mapped = [0u8; 32];
+        mapped[..BOUNDARY].copy_from_slice(&hash.0[..BOUNDARY]);
+        mapped[BOUNDARY] = key_bytes[BOUNDARY];
+        StorageKey::from_be_bytes(mapped)
+    }
+
+    /// Reads the slot at the mapped address of `key`.
+    ///
+    /// Maps to Go's `Storage.Get(key common.Hash)`.
+    pub fn get_by_key<Db: Database>(&self, db: &mut Db, key: StorageKey) -> Result<StorageValue, Db::Error> {
+        db.storage(self.account, self.map_address_by_key(key))
+    }
+
+    /// Writes `value` at the mapped address of `key`.
+    ///
+    /// Maps to Go's `Storage.Set(key, value common.Hash)`.
+    pub fn set_by_key<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: StorageKey,
+        value: StorageValue,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        ctx.journal_mut()
+            .sstore(self.account, self.map_address_by_key(key), value)
+            .map(|_| ())
+    }
+
+    /// Clears (zeroes) the slot at the mapped address of `key`.
+    ///
+    /// Maps to Go's `Storage.Clear(key common.Hash)`.
+    pub fn clear_by_key<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: StorageKey,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set_by_key(ctx, key, StorageValue::ZERO)
+    }
+
+    /// Reads the low 64 bits of the slot at the mapped address of `key`.
+    ///
+    /// Maps to Go's `Storage.GetUint64(key common.Hash)`.
+    pub fn get_uint64_by_key<Db: Database>(&self, db: &mut Db, key: StorageKey) -> Result<u64, Db::Error> {
+        let val = self.get_by_key(db, key)?;
+        Ok(val.to::<u64>())
+    }
+
+    /// Creates a child storage space with key `keccak256(self.storage_key ++ id)`.
+    ///
+    /// Maps to Go's `Storage.OpenSubStorage(id []byte)`.
+    pub fn open_sub_storage(&self, id: &[u8]) -> Storage<B>
+    where
+        B: Clone,
+    {
+        let mut input = Vec::with_capacity(self.storage_key.len() + id.len());
+        input.extend_from_slice(&self.storage_key);
+        input.extend_from_slice(id);
+        Storage {
+            account: self.account,
+            storage_key: keccak256(&input).0.to_vec(),
+            burner: self.burner.clone(),
+        }
+    }
+
+    /// Opens a `StorageBackedUint64` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedUint64(offset uint64)`.
+    pub fn open_storage_backed_uint64(&self, offset: u64) -> StorageBackedUint64<B>
+    where
+        B: Clone,
+    {
+        StorageBackedUint64(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        ))
+    }
+
+    /// Opens a `StorageBackedAddress` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedAddress(offset uint64)`.
+    pub fn open_storage_backed_address(&self, offset: u64) -> StorageBackedAddress<B>
+    where
+        B: Clone,
+    {
+        StorageBackedAddress(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        ))
+    }
+
+    /// Opens a `StorageBackedAddressOrNil` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedAddressOrNil(offset uint64)`.
+    pub fn open_storage_backed_address_or_nil(&self, offset: u64) -> StorageBackedAddressOrNil<B>
+    where
+        B: Clone,
+    {
+        StorageBackedAddressOrNil(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        ))
+    }
+
+    /// Opens a `StorageBackedBips` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedBips(offset uint64)`.
+    pub fn open_storage_backed_bips(&self, offset: u64) -> StorageBackedBips<B>
+    where
+        B: Clone,
+    {
+        StorageBackedBips(StorageBackedInt64(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        )))
+    }
+
+    /// Opens a `StorageBackedUBips` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedUBips(offset uint64)`.
+    pub fn open_storage_backed_ubips(&self, offset: u64) -> StorageBackedUBips<B>
+    where
+        B: Clone,
+    {
+        StorageBackedUBips(StorageBackedUint64(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        )))
+    }
+
+    /// Opens a `StorageBackedUint16` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedUint16(offset uint64)`.
+    pub fn open_storage_backed_uint16(&self, offset: u64) -> StorageBackedUint16<B>
+    where
+        B: Clone,
+    {
+        StorageBackedUint16(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        ))
+    }
+
+    /// Opens a `StorageBackedUint24` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedUint24(offset uint64)`.
+    pub fn open_storage_backed_uint24(&self, offset: u64) -> StorageBackedUint24<B>
+    where
+        B: Clone,
+    {
+        StorageBackedUint24(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        ))
+    }
+
+    /// Opens a `StorageBackedUint32` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedUint32(offset uint64)`.
+    pub fn open_storage_backed_uint32(&self, offset: u64) -> StorageBackedUint32<B>
+    where
+        B: Clone,
+    {
+        StorageBackedUint32(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        ))
     }
 
     /// Maps to Go's `Storage.GetBytesSize`.

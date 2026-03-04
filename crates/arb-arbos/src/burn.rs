@@ -26,6 +26,8 @@
 
 pub trait Burner {}
 
+pub struct SystemBurner {}
+
 // type SystemBurner struct {
 // 	gasBurnt    multigas.MultiGas
 // 	tracingInfo *util.TracingInfo

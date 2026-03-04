@@ -1,9 +1,7 @@
 [package]
-name = "arb-revm"
+name = "arb-arbos"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-arb-arbos.workspace = true
 revm.workspace = true
-alloy-sol-types.workspace = true

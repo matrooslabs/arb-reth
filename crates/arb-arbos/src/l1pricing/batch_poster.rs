@@ -26,7 +26,11 @@
 // )
 
 // // BatchPostersTable is the layout of storage in the table
-pub struct BatchPostersTable {}
+use crate::burn::Burner;
+
+pub struct BatchPostersTable<B: Burner> {
+    _phantom: std::marker::PhantomData<B>,
+}
 // type BatchPostersTable struct {
 // 	posterAddrs   *addressSet.AddressSet
 // 	posterInfo    *storage.Storage

@@ -24,7 +24,7 @@
 // 	"github.com/offchainlabs/nitro/util/arbmath"
 // )
 
-use crate::arbos::{
+use crate::{
     burn::Burner,
     l1pricing::batch_poster::BatchPostersTable,
     storage::storage::{
@@ -35,7 +35,7 @@ use crate::arbos::{
 
 pub struct L1PricingState<B: Burner> {
     // parameters
-    batch_poster_table: BatchPostersTable,
+    batch_poster_table: BatchPostersTable<B>,
     pay_rewards_to: StorageBackedAddress<B>,
     equilibration_units: StorageBackedBigUint<B>,
     inertia: StorageBackedUint64<B>,
