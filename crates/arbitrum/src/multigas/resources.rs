@@ -36,13 +36,13 @@ use core::fmt;
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResourceKind {
-    Unknown         = 0,
-    Computation     = 1,
-    HistoryGrowth   = 2,
-    StorageAccess   = 3,
-    StorageGrowth   = 4,
-    L1Calldata      = 5,
-    L2Calldata      = 6,
+    Unknown = 0,
+    Computation = 1,
+    HistoryGrowth = 2,
+    StorageAccess = 3,
+    StorageGrowth = 4,
+    L1Calldata = 5,
+    L2Calldata = 6,
     WasmComputation = 7,
 }
 
@@ -54,13 +54,13 @@ impl ResourceKind {
 impl fmt::Display for ResourceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Self::Unknown         => "Unknown",
-            Self::Computation     => "Computation",
-            Self::HistoryGrowth   => "HistoryGrowth",
-            Self::StorageAccess   => "StorageAccess",
-            Self::StorageGrowth   => "StorageGrowth",
-            Self::L1Calldata      => "L1Calldata",
-            Self::L2Calldata      => "L2Calldata",
+            Self::Unknown => "Unknown",
+            Self::Computation => "Computation",
+            Self::HistoryGrowth => "HistoryGrowth",
+            Self::StorageAccess => "StorageAccess",
+            Self::StorageGrowth => "StorageGrowth",
+            Self::L1Calldata => "L1Calldata",
+            Self::L2Calldata => "L2Calldata",
             Self::WasmComputation => "WasmComputation",
         };
         f.write_str(s)
@@ -109,7 +109,7 @@ pub fn check_resource_kind(id: u8) -> Result<ResourceKind, String> {
 ///
 /// Maps to Go's `Pair`.
 pub struct Pair {
-    pub kind:   ResourceKind,
+    pub kind: ResourceKind,
     pub amount: u64,
 }
 
@@ -119,8 +119,8 @@ pub struct Pair {
 /// Maps to Go's `MultiGas`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MultiGas {
-    gas:    [u64; ResourceKind::COUNT],
-    total:  u64,
+    gas: [u64; ResourceKind::COUNT],
+    total: u64,
     refund: u64,
 }
 
@@ -211,13 +211,27 @@ impl MultiGas {
         mg
     }
 
-    pub fn computation(amount: u64)      -> Self { Self::new(ResourceKind::Computation,     amount) }
-    pub fn history_growth(amount: u64)   -> Self { Self::new(ResourceKind::HistoryGrowth,   amount) }
-    pub fn storage_access(amount: u64)   -> Self { Self::new(ResourceKind::StorageAccess,   amount) }
-    pub fn storage_growth(amount: u64)   -> Self { Self::new(ResourceKind::StorageGrowth,   amount) }
-    pub fn l1_calldata(amount: u64)      -> Self { Self::new(ResourceKind::L1Calldata,      amount) }
-    pub fn l2_calldata(amount: u64)      -> Self { Self::new(ResourceKind::L2Calldata,      amount) }
-    pub fn wasm_computation(amount: u64) -> Self { Self::new(ResourceKind::WasmComputation, amount) }
+    pub fn computation(amount: u64) -> Self {
+        Self::new(ResourceKind::Computation, amount)
+    }
+    pub fn history_growth(amount: u64) -> Self {
+        Self::new(ResourceKind::HistoryGrowth, amount)
+    }
+    pub fn storage_access(amount: u64) -> Self {
+        Self::new(ResourceKind::StorageAccess, amount)
+    }
+    pub fn storage_growth(amount: u64) -> Self {
+        Self::new(ResourceKind::StorageGrowth, amount)
+    }
+    pub fn l1_calldata(amount: u64) -> Self {
+        Self::new(ResourceKind::L1Calldata, amount)
+    }
+    pub fn l2_calldata(amount: u64) -> Self {
+        Self::new(ResourceKind::L2Calldata, amount)
+    }
+    pub fn wasm_computation(amount: u64) -> Self {
+        Self::new(ResourceKind::WasmComputation, amount)
+    }
 
     /// Returns the gas amount for `kind`. Maps to Go's `MultiGas.Get`.
     pub fn get(&self, kind: ResourceKind) -> u64 {
@@ -268,14 +282,20 @@ impl MultiGas {
         let mut res = *self;
         for i in 0..ResourceKind::COUNT {
             let (v, overflow) = saturating_scalar_add(res.gas[i], x.gas[i]);
-            if overflow { return (*self, true); }
+            if overflow {
+                return (*self, true);
+            }
             res.gas[i] = v;
         }
         let (total, overflow) = saturating_scalar_add(res.total, x.total);
-        if overflow { return (*self, true); }
+        if overflow {
+            return (*self, true);
+        }
         res.total = total;
         let (refund, overflow) = saturating_scalar_add(res.refund, x.refund);
-        if overflow { return (*self, true); }
+        if overflow {
+            return (*self, true);
+        }
         res.refund = refund;
         (res, false)
     }
@@ -286,7 +306,7 @@ impl MultiGas {
         for i in 0..ResourceKind::COUNT {
             res.gas[i] = res.gas[i].saturating_add(x.gas[i]);
         }
-        res.total  = res.total.saturating_add(x.total);
+        res.total = res.total.saturating_add(x.total);
         res.refund = res.refund.saturating_add(x.refund);
         res
     }
@@ -296,7 +316,7 @@ impl MultiGas {
         for i in 0..ResourceKind::COUNT {
             self.gas[i] = self.gas[i].saturating_add(x.gas[i]);
         }
-        self.total  = self.total.saturating_add(x.total);
+        self.total = self.total.saturating_add(x.total);
         self.refund = self.refund.saturating_add(x.refund);
     }
 
@@ -307,11 +327,15 @@ impl MultiGas {
         let mut res = *self;
         for i in 0..ResourceKind::COUNT {
             let (v, underflow) = saturating_scalar_sub(res.gas[i], x.gas[i]);
-            if underflow { return (*self, true); }
+            if underflow {
+                return (*self, true);
+            }
             res.gas[i] = v;
         }
         let (refund, underflow) = saturating_scalar_sub(res.refund, x.refund);
-        if underflow { return (*self, true); }
+        if underflow {
+            return (*self, true);
+        }
         res.refund = refund;
         res.recompute_total();
         (res, false)
@@ -334,10 +358,14 @@ impl MultiGas {
     pub fn safe_increment(&self, kind: ResourceKind, gas: u64) -> (Self, bool) {
         let mut res = *self;
         let (v, overflow) = saturating_scalar_add(self.gas[kind as usize], gas);
-        if overflow { return (*self, true); }
+        if overflow {
+            return (*self, true);
+        }
         res.gas[kind as usize] = v;
         let (total, overflow) = saturating_scalar_add(self.total, gas);
-        if overflow { return (*self, true); }
+        if overflow {
+            return (*self, true);
+        }
         res.total = total;
         (res, false)
     }
@@ -385,7 +413,11 @@ impl MultiGas {
 /// On overflow, sum is `u64::MAX`. Maps to Go's `saturatingScalarAdd`.
 fn saturating_scalar_add(a: u64, b: u64) -> (u64, bool) {
     let (sum, overflow) = a.overflowing_add(b);
-    if overflow { (u64::MAX, true) } else { (sum, false) }
+    if overflow {
+        (u64::MAX, true)
+    } else {
+        (sum, false)
+    }
 }
 
 /// Subtracts two `u64` values, returning `(diff, underflowed)`.
