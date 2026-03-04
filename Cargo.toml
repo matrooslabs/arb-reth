@@ -1,8 +1,14 @@
 [workspace]
-members = ["crates/arb-arbos", "crates/arb-reth", "crates/arb-revm", "crates/arbitrum"]
+members = [
+    "crates/arb-arbos",
+    "crates/arb-reth",
+    "crates/arb-revm",
+    "crates/arbitrum",
+]
 resolver = "2"
 
 [workspace.dependencies]
 arb-arbos = { path = "crates/arb-arbos" }
+arbitrum = { path = "crates/arbitrum" }
 revm = "34.0.0"
 alloy-sol-types = "1.5.7"
