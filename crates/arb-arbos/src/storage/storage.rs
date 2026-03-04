@@ -1395,6 +1395,134 @@ impl<B: Burner> Storage<B> {
         Ok(val.to::<u64>())
     }
 
+    /// Reads the raw slot value at `map(UintToHash(key))`.
+    ///
+    /// Maps to Go's `Storage.GetByUint64(key uint64)`.
+    pub fn get_by_uint64<Db: Database>(&self, db: &mut Db, key: u64) -> Result<StorageValue, Db::Error> {
+        self.get_by_key(db, StorageKey::from(key))
+    }
+
+    /// Reads the uint64 value at `map(UintToHash(key))`.
+    ///
+    /// Maps to Go's `Storage.GetUint64ByUint64(key uint64)`.
+    pub fn get_uint64_by_uint64<Db: Database>(&self, db: &mut Db, key: u64) -> Result<u64, Db::Error> {
+        self.get_uint64_by_key(db, StorageKey::from(key))
+    }
+
+    /// Writes `value` at `map(key)`. Panics if the burner is read-only; charges
+    /// `StorageWriteCost` or `StorageWriteZeroCost` via the burner.
+    ///
+    /// Maps to Go's `Storage.Set(key, value common.Hash)`.
+    pub fn set<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: StorageKey,
+        value: StorageValue,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        if self.burner.read_only() {
+            panic!("read-only burner attempted to mutate state");
+        }
+        let _ = self.burner.burn(ResourceKind::StorageAccess, write_cost(value));
+        self.set_by_key(ctx, key, value)
+    }
+
+    /// Writes a `u64` value at `map(key)`.
+    ///
+    /// Maps to Go's `Storage.SetUint64(key common.Hash, value uint64)`.
+    pub fn set_uint64<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: StorageKey,
+        value: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set(ctx, key, StorageValue::from(value))
+    }
+
+    /// Writes `value` at `map(UintToHash(key))`.
+    ///
+    /// Maps to Go's `Storage.SetByUint64(key uint64, value common.Hash)`.
+    pub fn set_by_uint64<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: u64,
+        value: StorageValue,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set(ctx, StorageKey::from(key), value)
+    }
+
+    /// Writes a `u64` value at `map(UintToHash(key))`.
+    ///
+    /// Maps to Go's `Storage.SetUint64ByUint64(key uint64, value uint64)`.
+    pub fn set_uint64_by_uint64<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: u64,
+        value: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set(ctx, StorageKey::from(key), StorageValue::from(value))
+    }
+
+    /// Writes a `u32` value at `map(key)`.
+    ///
+    /// Maps to Go's `Storage.SetUint32(key common.Hash, value uint32)`.
+    pub fn set_uint32<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: StorageKey,
+        value: u32,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set(ctx, key, StorageValue::from(u64::from(value)))
+    }
+
+    /// Writes `value` at `map(UintToHash(key))` where `key` is a `u32`.
+    ///
+    /// Maps to Go's `Storage.SetByUint32(key uint32, value common.Hash)`.
+    pub fn set_by_uint32<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: u32,
+        value: StorageValue,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set(ctx, StorageKey::from(u64::from(key)), value)
+    }
+
+    /// Clears (zeroes) the slot at `map(key)`.
+    ///
+    /// Maps to Go's `Storage.Clear(key common.Hash)`.
+    pub fn clear<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: StorageKey,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set(ctx, key, StorageValue::ZERO)
+    }
+
+    /// Clears (zeroes) the slot at `map(UintToHash(key))`.
+    ///
+    /// Maps to Go's `Storage.ClearByUint64(key uint64)`.
+    pub fn clear_by_uint64<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.set(ctx, StorageKey::from(key), StorageValue::ZERO)
+    }
+
+    /// Atomically reads the current value and writes `new_value` at `map(key)`.
+    /// Returns the old value.
+    ///
+    /// Maps to Go's `Storage.Swap(key, newValue common.Hash)`.
+    pub fn swap<CTX: ContextTr>(
+        &self,
+        ctx: &mut CTX,
+        key: StorageKey,
+        new_value: StorageValue,
+    ) -> Result<StorageValue, <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        let old = self.get_by_key(ctx.db_mut(), key)?;
+        self.set(ctx, key, new_value)?;
+        Ok(old)
+    }
+
     /// Creates a child storage space with key `keccak256(self.storage_key ++ id)`.
     ///
     /// Maps to Go's `Storage.OpenSubStorage(id []byte)`.

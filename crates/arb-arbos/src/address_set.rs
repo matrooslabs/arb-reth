@@ -54,15 +54,24 @@ impl<B: Burner> AddressSet<B> {
         AddressSet { backing_storage: sto, size, by_address }
     }
 
-    /// Writes the initial size of zero into slot 0. Call once on a fresh storage.
+    /// Writes the initial size of zero into slot 0. Call once on a fresh storage
+    /// **before** opening the `AddressSet` via `new`.
     ///
-    /// Maps to Go's `Initialize(sto *storage.Storage)`.
+    /// Maps to Go's package-level `Initialize(sto *storage.Storage)` — a free
+    /// function that operates on the raw storage before it is wrapped.
+    // func Initialize(sto *storage.Storage) error {
+    //     return sto.SetUint64ByUint64(0, 0)
+    // }
     pub fn initialize<CTX: ContextTr>(
-        &mut self,
+        sto: &mut Storage<B>,
         ctx: &mut CTX,
-    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
-        self.backing_storage.write_slot(ctx, 0, StorageValue::ZERO)
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error>
+    where
+        B: Clone,
+    {
+        sto.set_uint64_by_uint64(ctx, 0, 0)
     }
+    
 
     /// Returns the number of members.
     ///

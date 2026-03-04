@@ -26,10 +26,16 @@
 // )
 
 // // BatchPostersTable is the layout of storage in the table
-use crate::burn::Burner;
+use crate::{
+    address_set::AddressSet,
+    burn::Burner,
+    storage::storage::{Storage, StorageBackedAddress, StorageBackedBigInt},
+};
 
 pub struct BatchPostersTable<B: Burner> {
-    _phantom: std::marker::PhantomData<B>,
+    poster_addrs: AddressSet<B>,
+    poster_info: Storage<B>,
+    total_funds_due: StorageBackedBigInt<B>,
 }
 // type BatchPostersTable struct {
 // 	posterAddrs   *addressSet.AddressSet
@@ -37,6 +43,11 @@ pub struct BatchPostersTable<B: Burner> {
 // 	totalFundsDue storage.StorageBackedBigInt
 // }
 
+pub struct BatchPosterState<B: Burner> {
+    funds_due: StorageBackedBigInt<B>,
+    pay_to: StorageBackedAddress<B>,
+    posters_table: BatchPostersTable<B>,
+}
 // type BatchPosterState struct {
 // 	fundsDue     storage.StorageBackedBigInt
 // 	payTo        storage.StorageBackedAddress
