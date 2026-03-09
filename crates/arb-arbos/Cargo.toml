@@ -7,3 +7,4 @@ edition = "2024"
 revm.workspace = true
 arbitrum.workspace = true
 lru.workspace = true
+alloy-primitives.workspace = true

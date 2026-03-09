@@ -1762,6 +1762,23 @@ impl<B: Burner> Storage<B> {
         ))
     }
 
+    /// Opens a `StorageBackedBigUint` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedBigUint(offset uint64)`.
+    // func (s *Storage) OpenStorageBackedBigUint(offset uint64) StorageBackedBigUint {
+    //     return StorageBackedBigUint{s.NewSlot(offset)}
+    // }
+    pub fn open_storage_backed_big_uint(&self, offset: u64) -> StorageBackedBigUint<B>
+    where
+        B: Clone,
+    {
+        StorageBackedBigUint(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        ))
+    }
+
     /// Opens a `StorageBackedBytes` rooted at the sub-storage identified by `id`.
     ///
     /// Maps to Go's `Storage.OpenStorageBackedBytes(id []byte)`.

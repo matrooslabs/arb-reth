@@ -24,14 +24,75 @@
 // 	"github.com/offchainlabs/nitro/util/arbmath"
 // )
 
+use alloy_primitives::address;
+use revm::{
+    Database,
+    context_interface::{ContextTr, JournalTr},
+    primitives::{Address, U256},
+};
+
 use crate::{
     burn::Burner,
-    l1pricing::batch_poster::BatchPostersTable,
+    l1pricing::batch_poster::{BatchPostersTable, OpenPosterResult},
     storage::storage::{
-        StorageBackedAddress, StorageBackedBigInt, StorageBackedBigUint, StorageBackedInt64,
-        StorageBackedUint64,
+        Storage, StorageBackedAddress, StorageBackedBigInt, StorageBackedBigUint,
+        StorageBackedInt64, StorageBackedUint64,
     },
 };
+
+// var (
+//     BatchPosterTableKey     = []byte{0}
+//     BatchPosterAddress      = common.HexToAddress("0xA4B000000000000000000073657175656e636572")
+//     BatchPosterPayToAddress = BatchPosterAddress
+// )
+const BATCH_POSTER_TABLE_KEY: &[u8] = &[0];
+const BATCH_POSTER_ADDRESS: Address = address!("A4B000000000000000000073657175656e636572");
+
+// const (
+//     payRewardsToOffset uint64 = iota   // 0
+//     equilibrationUnitsOffset           // 1
+//     inertiaOffset                      // 2
+//     perUnitRewardOffset                // 3
+//     lastUpdateTimeOffset               // 4
+//     fundsDueForRewardsOffset           // 5
+//     unitsSinceOffset                   // 6
+//     pricePerUnitOffset                 // 7
+//     lastSurplusOffset                  // 8
+//     perBatchGasCostOffset              // 9
+//     amortizedCostCapBipsOffset         // 10
+//     l1FeesAvailableOffset              // 11
+//     gasFloorPerTokenOffset             // 12
+// )
+const PAY_REWARDS_TO_OFFSET: u64 = 0;
+const EQUILIBRATION_UNITS_OFFSET: u64 = 1;
+const INERTIA_OFFSET: u64 = 2;
+const PER_UNIT_REWARD_OFFSET: u64 = 3;
+#[allow(dead_code)]
+const LAST_UPDATE_TIME_OFFSET: u64 = 4;
+const FUNDS_DUE_FOR_REWARDS_OFFSET: u64 = 5;
+#[allow(dead_code)]
+const UNITS_SINCE_OFFSET: u64 = 6;
+const PRICE_PER_UNIT_OFFSET: u64 = 7;
+#[allow(dead_code)]
+const LAST_SURPLUS_OFFSET: u64 = 8;
+#[allow(dead_code)]
+const PER_BATCH_GAS_COST_OFFSET: u64 = 9;
+#[allow(dead_code)]
+const AMORTIZED_COST_CAP_BIPS_OFFSET: u64 = 10;
+#[allow(dead_code)]
+const L1_FEES_AVAILABLE_OFFSET: u64 = 11;
+#[allow(dead_code)]
+const GAS_FLOOR_PER_TOKEN_OFFSET: u64 = 12;
+
+// const (
+//     InitialInertia           = 10
+//     InitialPerUnitReward     = 10
+// )
+// var InitialEquilibrationUnitsV0 = arbmath.UintToBig(60 * params.TxDataNonZeroGasEIP2028 * 100000)
+//     params.TxDataNonZeroGasEIP2028 = 16
+const INITIAL_INERTIA: u64 = 10;
+const INITIAL_PER_UNIT_REWARD: u64 = 10;
+const INITIAL_EQUILIBRATION_UNITS_V0: u64 = 60 * 16 * 100_000;
 
 pub struct L1PricingState<B: Burner> {
     // parameters
@@ -146,6 +207,50 @@ pub struct L1PricingState<B: Burner> {
 // 	}
 // 	return nil
 // }
+pub fn initialize_l1_pricing_state<B: Burner + Clone, CTX: ContextTr>(
+    sto: &Storage<B>,
+    ctx: &mut CTX,
+    initial_rewards_recipient: Address,
+    initial_l1_base_fee: U256,
+) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+    let bpt_storage = sto.open_cached_sub_storage(BATCH_POSTER_TABLE_KEY);
+    BatchPostersTable::initialize(&bpt_storage, ctx)?;
+    let mut bp_table = BatchPostersTable::open(&bpt_storage);
+    // BATCH_POSTER_PAY_TO_ADDRESS == BATCH_POSTER_ADDRESS in Go.
+    bp_table
+        .add_poster(ctx, BATCH_POSTER_ADDRESS, BATCH_POSTER_ADDRESS)
+        .map_err(|e| match e {
+            OpenPosterResult::Db(e) => e,
+            OpenPosterResult::Semantic(e) => {
+                panic!("unexpected semantic error adding initial batch poster: {e:?}")
+            }
+        })?;
+
+    // Store the rewards recipient address (Go: sto.SetByUint64(payRewardsToOffset, util.AddressToHash(...))).
+    let mut pay_rewards_to = sto.open_storage_backed_address(PAY_REWARDS_TO_OFFSET);
+    pay_rewards_to.set(ctx, initial_rewards_recipient)?;
+
+    let mut equilibration_units = sto.open_storage_backed_big_uint(EQUILIBRATION_UNITS_OFFSET);
+    equilibration_units.set_checked(ctx, U256::from(INITIAL_EQUILIBRATION_UNITS_V0))?;
+
+    sto.set_uint64_by_uint64(ctx, INERTIA_OFFSET, INITIAL_INERTIA)?;
+
+    let mut funds_due_for_rewards = sto.open_storage_backed_big_int(FUNDS_DUE_FOR_REWARDS_OFFSET);
+    funds_due_for_rewards.set_checked(ctx, revm::primitives::I256::ZERO)?;
+
+    sto.set_uint64_by_uint64(ctx, PER_UNIT_REWARD_OFFSET, INITIAL_PER_UNIT_REWARD)?;
+
+    // Go opens pricePerUnit as StorageBackedBigInt for SetSaturatingWithWarning;
+    // we use StorageBackedBigUint (same slot, same bytes) since the value is non-negative.
+    let mut price_per_unit = sto.open_storage_backed_big_uint(PRICE_PER_UNIT_OFFSET);
+    price_per_unit.set_saturating_with_warning(
+        ctx,
+        initial_l1_base_fee,
+        "initial L1 base fee (storing in price per unit)",
+    )?;
+
+    Ok(())
+}
 
 // func OpenL1PricingState(sto *storage.Storage, arbosVersion uint64) *L1PricingState {
 // 	return &L1PricingState{
