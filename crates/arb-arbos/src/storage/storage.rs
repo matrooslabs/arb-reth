@@ -50,6 +50,12 @@
 // // at location keccak256(storageKey, key) in the flat KVS. Two slots, whether in the same or different storage spaces,
 // // cannot occupy the same location because that would imply a collision in keccak256.
 
+use std::num::NonZeroUsize;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use lru::LruCache;
+
 use revm::{
     Database,
     context_interface::{ContextTr, JournalTr},
@@ -95,9 +101,26 @@ fn write_cost(value: StorageValue) -> u64 {
 // const StorageCodeHashCost = params.ColdAccountAccessCostEIP2929
 
 // const storageKeyCacheSize = 1024
+const STORAGE_KEY_CACHE_SIZE: usize = 1024;
 
 // var storageHashCache = lru.NewCache[string, []byte](storageKeyCacheSize)
 // var cacheFullLogged atomic.Bool
+//
+// Global LRU cache for `cached_keccak`. Keyed by the concatenated input bytes
+// (storageKey ++ key[0..31]); value is the full 32-byte keccak256 digest.
+// Equivalent to Go's package-level `storageHashCache`.
+//
+// ArbOS is single-threaded but the static requires `Sync`, so we wrap with
+// `Mutex`. The lock is uncontended in practice.
+static STORAGE_HASH_CACHE: LazyLock<Arc<Mutex<LruCache<Vec<u8>, [u8; 32]>>>> =
+    LazyLock::new(|| {
+        Arc::new(Mutex::new(LruCache::new(
+            NonZeroUsize::new(STORAGE_KEY_CACHE_SIZE).unwrap(),
+        )))
+    });
+
+// Maps to Go's `var cacheFullLogged atomic.Bool`.
+static CACHE_FULL_LOGGED: AtomicBool = AtomicBool::new(false);
 
 // // KVStorage uses a Geth database to create an evm key-value store for an arbitrary account.
 // func KVStorage(statedb vm.StateDB, burner burn.Burner, account common.Address) *Storage {
@@ -430,6 +453,12 @@ pub struct StorageSlot<B: Burner> {
     account: Address,
     slot: StorageKey,
     burner: B,
+}
+
+impl<B: Burner + Clone> Clone for StorageSlot<B> {
+    fn clone(&self) -> Self {
+        StorageSlot { account: self.account, slot: self.slot, burner: self.burner.clone() }
+    }
 }
 
 impl<B: Burner> StorageSlot<B> {
@@ -1052,6 +1081,12 @@ impl<B: Burner> StorageBackedBigUint<B> {
 
 pub struct StorageBackedBigInt<B: Burner>(StorageSlot<B>);
 
+impl<B: Burner + Clone> Clone for StorageBackedBigInt<B> {
+    fn clone(&self) -> Self {
+        StorageBackedBigInt(self.0.clone())
+    }
+}
+
 // type StorageBackedBigInt struct {
 // 	StorageSlot
 // }
@@ -1300,26 +1335,71 @@ pub struct Storage<B: Burner> {
     // through each call site rather than storing it, so callers pass `db` or
     // `ctx` directly to read/write methods.
     //
-    // Go's `hashCache *lru.Cache[string, []byte]` is not yet implemented.
-    // It memoises `cachedKeccak` results to avoid rehashing the same
-    // `storageKey ++ key[0..31]` inputs on every slot access. A Rust
-    // equivalent would be an `Option<Arc<Mutex<LruCache<[u8; 31], [u8; 31]>>>>`
-    // or similar.
+    // Mirrors Go's `hashCache *lru.Cache[string, []byte]`:
+    //   - `None`  → no caching (created by `open_sub_storage`, like Go's `OpenSubStorage`)
+    //   - `Some`  → holds a shared `Arc` reference to the global `STORAGE_HASH_CACHE`
+    //               (set by `open_cached_sub_storage`, like Go's `OpenCachedSubStorage`)
+    pub hash_cache: Option<Arc<Mutex<LruCache<Vec<u8>, [u8; 32]>>>>,
 }
 
 impl<B: Burner> Storage<B> {
+    /// Concatenates `data` slices and returns their keccak256 hash,
+    /// consulting `self.hash_cache` when present.
+    ///
+    /// Maps to Go's `Storage.cachedKeccak(data ...[]byte) []byte`:
+    ///   - `hash_cache == None` → always recomputes (like Go's `hashCache == nil` branch)
+    ///   - `hash_cache == Some` → checks/populates the shared LRU cache
+    // func (s *Storage) cachedKeccak(data ...[]byte) []byte {
+    //     if s.hashCache == nil {
+    //         return crypto.Keccak256(data...)
+    //     }
+    //     keyString := string(bytes.Join(data, []byte{}))
+    //     if hash, wasCached := s.hashCache.Get(keyString); wasCached {
+    //         return hash
+    //     }
+    //     hash := crypto.Keccak256(data...)
+    //     evicted := s.hashCache.Add(keyString, hash)
+    //     if evicted && cacheFullLogged.CompareAndSwap(false, true) {
+    //         log.Warn("Hash cache full, ...")
+    //     }
+    //     return hash
+    // }
+    fn cached_keccak(&self, data: &[&[u8]]) -> [u8; 32] {
+        let total = data.iter().map(|s| s.len()).sum();
+        let mut input = Vec::with_capacity(total);
+        for slice in data {
+            input.extend_from_slice(slice);
+        }
+        // No cache on this storage instance — just hash directly.
+        let Some(cache_arc) = &self.hash_cache else {
+            return keccak256(&input).0;
+        };
+        let mut cache = cache_arc.lock().unwrap();
+        if let Some(&cached) = cache.get(input.as_slice()) {
+            return cached;
+        }
+        let hash = keccak256(&input).0;
+        // `push` returns the evicted entry when the cache reached capacity.
+        // Mirrors Go's `hashCache.Add` which returns true on eviction.
+        if cache.push(input, hash).is_some()
+            && !CACHE_FULL_LOGGED.swap(true, Ordering::Relaxed)
+        {
+            eprintln!(
+                "[ArbOS] storage hash cache full; some non-static storage keys may fill up the cache"
+            );
+        }
+        hash
+    }
+
     /// Derives the physical EVM slot for logical slot `offset`.
     ///
     /// Maps to Go's `Storage.mapAddress(util.UintToHash(offset))`.
     pub fn map_address(&self, offset: u64) -> StorageKey {
         let key_bytes = U256::from(offset).to_be_bytes::<32>();
         const BOUNDARY: usize = 31;
-        let mut input = Vec::with_capacity(self.storage_key.len() + BOUNDARY);
-        input.extend_from_slice(&self.storage_key);
-        input.extend_from_slice(&key_bytes[..BOUNDARY]);
-        let hash = keccak256(&input);
+        let hash = self.cached_keccak(&[&self.storage_key, &key_bytes[..BOUNDARY]]);
         let mut mapped = [0u8; 32];
-        mapped[..BOUNDARY].copy_from_slice(&hash.0[..BOUNDARY]);
+        mapped[..BOUNDARY].copy_from_slice(&hash[..BOUNDARY]);
         mapped[BOUNDARY] = key_bytes[BOUNDARY];
         StorageKey::from_be_bytes(mapped)
     }
@@ -1345,12 +1425,9 @@ impl<B: Burner> Storage<B> {
     pub fn map_address_by_key(&self, key: StorageKey) -> StorageKey {
         let key_bytes = key.to_be_bytes::<32>();
         const BOUNDARY: usize = 31;
-        let mut input = Vec::with_capacity(self.storage_key.len() + BOUNDARY);
-        input.extend_from_slice(&self.storage_key);
-        input.extend_from_slice(&key_bytes[..BOUNDARY]);
-        let hash = keccak256(&input);
+        let hash = self.cached_keccak(&[&self.storage_key, &key_bytes[..BOUNDARY]]);
         let mut mapped = [0u8; 32];
-        mapped[..BOUNDARY].copy_from_slice(&hash.0[..BOUNDARY]);
+        mapped[..BOUNDARY].copy_from_slice(&hash[..BOUNDARY]);
         mapped[BOUNDARY] = key_bytes[BOUNDARY];
         StorageKey::from_be_bytes(mapped)
     }
@@ -1530,13 +1607,32 @@ impl<B: Burner> Storage<B> {
     where
         B: Clone,
     {
-        let mut input = Vec::with_capacity(self.storage_key.len() + id.len());
-        input.extend_from_slice(&self.storage_key);
-        input.extend_from_slice(id);
         Storage {
             account: self.account,
-            storage_key: keccak256(&input).0.to_vec(),
+            storage_key: self.cached_keccak(&[&self.storage_key, id]).to_vec(),
             burner: self.burner.clone(),
+            // No cache for children opened via OpenSubStorage (matches Go).
+            hash_cache: None,
+        }
+    }
+
+    /// Creates a child storage space with key `keccak256(self.storage_key ++ id)`
+    /// and attaches the global hash cache so that the child's `cached_keccak` calls
+    /// benefit from caching.
+    ///
+    /// Maps to Go's `Storage.OpenCachedSubStorage(id []byte)`, which always passes
+    /// `storageHashCache` (the package-level global) to the child regardless of
+    /// whether the parent itself has a cache.
+    pub fn open_cached_sub_storage(&self, id: &[u8]) -> Storage<B>
+    where
+        B: Clone,
+    {
+        Storage {
+            account: self.account,
+            storage_key: self.cached_keccak(&[&self.storage_key, id]).to_vec(),
+            burner: self.burner.clone(),
+            // Always use the global cache (mirrors Go: `hashCache: storageHashCache`).
+            hash_cache: Some(Arc::clone(&*STORAGE_HASH_CACHE)),
         }
     }
 
@@ -1650,6 +1746,33 @@ impl<B: Burner> Storage<B> {
             self.map_address(offset),
             self.burner.clone(),
         ))
+    }
+
+    /// Opens a `StorageBackedBigInt` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedBigInt(offset uint64)`.
+    pub fn open_storage_backed_big_int(&self, offset: u64) -> StorageBackedBigInt<B>
+    where
+        B: Clone,
+    {
+        StorageBackedBigInt(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        ))
+    }
+
+    /// Opens a `StorageBackedBytes` rooted at the sub-storage identified by `id`.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedBytes(id []byte)`.
+    // func (s *Storage) OpenStorageBackedBytes(id []byte) StorageBackedBytes {
+    //     return StorageBackedBytes{*s.OpenSubStorage(id)}
+    // }
+    pub fn open_storage_backed_bytes(&self, id: &[u8]) -> StorageBackedBytes<B>
+    where
+        B: Clone,
+    {
+        StorageBackedBytes(self.open_sub_storage(id))
     }
 
     /// Maps to Go's `Storage.GetBytesSize`.

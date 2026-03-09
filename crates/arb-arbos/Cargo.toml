@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 revm.workspace = true
 arbitrum.workspace = true
+lru.workspace = true
