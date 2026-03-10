@@ -269,7 +269,7 @@ use crate::{
 const BATCH_POSTER_TABLE_KEY: &[u8] = &[0];
 const BATCH_POSTER_ADDRESS: Address = address!("A4B000000000000000000073657175656e636572");
 // types.L1PricerFundsPoolAddress in Go (go-ethereum/core/types/arbitrum_types.go).
-const L1_PRICER_FUNDS_POOL_ADDRESS: Address = address!("000000000000000000000000000000000000006c");
+pub(super) const L1_PRICER_FUNDS_POOL_ADDRESS: Address = address!("000000000000000000000000000000000000006c");
 
 // const (
 //     payRewardsToOffset uint64 = iota   // 0
@@ -325,7 +325,7 @@ const ARBOS_VERSION_50: u64 = 50;
 
 pub struct L1PricingState<B: Burner> {
     // parameters
-    batch_poster_table: BatchPostersTable<B>,
+    pub(super) batch_poster_table: BatchPostersTable<B>,
     pay_rewards_to: StorageBackedAddress<B>,
     equilibration_units: StorageBackedBigUint<B>,
     inertia: StorageBackedUint64<B>,
@@ -951,7 +951,15 @@ impl<B: Burner> L1PricingState<B> {
         B: Clone,
     {
         if arbos_version < ARBOS_VERSION_10 {
-            todo!("_preversion10_UpdateForBatchPosterSpending not yet ported");
+            return self.pre_version10_update_for_batch_poster_spending(
+                ctx,
+                arbos_version,
+                update_time,
+                current_time,
+                batch_poster,
+                wei_spent,
+                l1_basefee,
+            );
         }
 
         let mut poster_state = self
