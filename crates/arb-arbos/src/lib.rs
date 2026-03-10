@@ -5,6 +5,7 @@ pub mod arbosstate;
 pub mod burn;
 pub mod l1pricing;
 pub mod l2pricing;
+pub mod retryables;
 pub mod storage;
 pub mod util;
 pub trait ArbContextTr: ContextTr {}
