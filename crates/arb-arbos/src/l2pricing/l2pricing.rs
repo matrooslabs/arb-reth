@@ -1,12 +1,21 @@
+use std::collections::HashMap;
 use revm::{
     Database,
     context_interface::{ContextTr, JournalTr},
+    primitives::U256,
 };
+use arbitrum::multigas::resources::ResourceKind;
 use crate::{
-    burn::Burner, l2pricing::multi_gas_fees::MultiGasFees, storage::{
+    burn::Burner,
+    l2pricing::{
+        gas_constraint::GasConstraint,
+        multi_gas_constraint::MultiGasConstraint,
+        multi_gas_fees::MultiGasFees,
+    },
+    storage::{
         storage::{Storage, StorageBackedBigUint, StorageBackedUint64},
         vector::SubStorageVector,
-    }
+    },
 };
 
 pub struct L2PricingState<B: Burner> {
@@ -125,6 +134,271 @@ impl<B: Burner> L2PricingState<B> {
         sto.set_uint64_by_uint64(ctx, PRICING_INERTIA_OFFSET, INITIAL_PRICING_INERTIA)?;
         sto.set_uint64_by_uint64(ctx, BACKLOG_TOLERANCE_OFFSET, INITIAL_BACKLOG_TOLERANCE)?;
         sto.set_uint64_by_uint64(ctx, MIN_BASE_FEE_WEI_OFFSET, INITIAL_MINIMUM_BASE_FEE_WEI)
+    }
+
+    // func (ps *L2PricingState) BaseFeeWei() (*big.Int, error)
+    pub fn base_fee_wei<Db: Database>(&self, db: &mut Db) -> Result<U256, Db::Error> {
+        self.base_fee_wei.get(db)
+    }
+
+    // func (ps *L2PricingState) SetBaseFeeWei(val *big.Int) error
+    pub fn set_base_fee_wei<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: U256,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.base_fee_wei.set_saturating_with_warning(ctx, val, "L2 base fee")
+    }
+
+    // func (ps *L2PricingState) MinBaseFeeWei() (*big.Int, error)
+    pub fn min_base_fee_wei<Db: Database>(&self, db: &mut Db) -> Result<U256, Db::Error> {
+        self.min_base_fee_wei.get(db)
+    }
+
+    // func (ps *L2PricingState) SetMinBaseFeeWei(val *big.Int) error
+    pub fn set_min_base_fee_wei<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: U256,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.min_base_fee_wei.set_checked(ctx, val)
+    }
+
+    // func (ps *L2PricingState) SpeedLimitPerSecond() (uint64, error)
+    pub fn speed_limit_per_second<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        self.speed_limit_per_second.get(db)
+    }
+
+    // func (ps *L2PricingState) SetSpeedLimitPerSecond(limit uint64) error
+    pub fn set_speed_limit_per_second<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        limit: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.speed_limit_per_second.set(ctx, limit)
+    }
+
+    // func (ps *L2PricingState) PerBlockGasLimit() (uint64, error)
+    pub fn per_block_gas_limit<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        self.per_block_gas_limit.get(db)
+    }
+
+    // func (ps *L2PricingState) SetMaxPerBlockGasLimit(limit uint64) error
+    pub fn set_max_per_block_gas_limit<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        limit: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.per_block_gas_limit.set(ctx, limit)
+    }
+
+    // func (ps *L2PricingState) PerTxGasLimit() (uint64, error)
+    pub fn per_tx_gas_limit<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        self.per_tx_gas_limit.get(db)
+    }
+
+    // func (ps *L2PricingState) SetMaxPerTxGasLimit(limit uint64) error
+    pub fn set_max_per_tx_gas_limit<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        limit: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.per_tx_gas_limit.set(ctx, limit)
+    }
+
+    // func (ps *L2PricingState) GasBacklog() (uint64, error)
+    pub fn gas_backlog<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        self.gas_backlog.get(db)
+    }
+
+    // func (ps *L2PricingState) SetGasBacklog(backlog uint64) error
+    pub fn set_gas_backlog<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        backlog: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.gas_backlog.set(ctx, backlog)
+    }
+
+    // func (ps *L2PricingState) PricingInertia() (uint64, error)
+    pub fn pricing_inertia<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        self.pricing_inertia.get(db)
+    }
+
+    // func (ps *L2PricingState) SetPricingInertia(val uint64) error
+    pub fn set_pricing_inertia<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.pricing_inertia.set(ctx, val)
+    }
+
+    // func (ps *L2PricingState) BacklogTolerance() (uint64, error)
+    pub fn backlog_tolerance<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        self.backlog_tolerance.get(db)
+    }
+
+    // func (ps *L2PricingState) SetBacklogTolerance(val uint64) error
+    pub fn set_backlog_tolerance<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        val: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error> {
+        self.backlog_tolerance.set(ctx, val)
+    }
+
+    // func (ps *L2PricingState) Restrict(err error)
+    pub fn restrict(&self, err: Option<&str>) {
+        self.storage.burner.restrict(err)
+    }
+
+    // func (ps *L2PricingState) GasConstraintsLength() (uint64, error)
+    pub fn gas_constraints_length<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        self.gas_constraints.length(db)
+    }
+
+    // func (ps *L2PricingState) OpenGasConstraintAt(i uint64) *GasConstraint
+    pub fn open_gas_constraint_at(&self, i: u64) -> GasConstraint<B>
+    where
+        B: Clone,
+    {
+        GasConstraint::open(&self.gas_constraints.at(i))
+    }
+
+    // func (ps *L2PricingState) AddGasConstraint(target uint64, adjustmentWindow uint64, backlog uint64) error
+    pub fn add_gas_constraint<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        target: u64,
+        adjustment_window: u64,
+        backlog: u64,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error>
+    where
+        B: Clone,
+    {
+        let sub_storage = self.gas_constraints.push(ctx)?;
+        let mut constraint = GasConstraint::open(&sub_storage);
+        constraint.set_target(ctx, target)?;
+        constraint.set_adjustment_window(ctx, adjustment_window)?;
+        constraint.set_backlog(ctx, backlog)
+    }
+
+    // func (ps *L2PricingState) ClearGasConstraints() error
+    pub fn clear_gas_constraints<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error>
+    where
+        B: Clone,
+    {
+        let length = self.gas_constraints_length(ctx.db_mut())?;
+        for _ in 0..length {
+            let sub_storage = self.gas_constraints.pop(ctx)?;
+            let mut constraint = GasConstraint::open(&sub_storage);
+            constraint.clear(ctx)?;
+        }
+        Ok(())
+    }
+
+    // func (ps *L2PricingState) MultiGasConstraintsLength() (uint64, error)
+    pub fn multi_gas_constraints_length<Db: Database>(&self, db: &mut Db) -> Result<u64, Db::Error> {
+        self.multi_gas_constraints.length(db)
+    }
+
+    // func (ps *L2PricingState) OpenMultiGasConstraintAt(i uint64) *MultiGasConstraint
+    pub fn open_multi_gas_constraint_at(&self, i: u64) -> MultiGasConstraint<B>
+    where
+        B: Clone,
+    {
+        MultiGasConstraint::open(&self.multi_gas_constraints.at(i))
+    }
+
+    // func (ps *L2PricingState) AddMultiGasConstraint(target uint64, adjustmentWindow uint32, backlog uint64, weights map[uint8]uint64) error
+    pub fn add_multi_gas_constraint<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+        target: u64,
+        adjustment_window: u32,
+        backlog: u64,
+        weights: &HashMap<u8, u64>,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error>
+    where
+        B: Clone,
+    {
+        let sub_storage = self.multi_gas_constraints.push(ctx)?;
+        let mut constraint = MultiGasConstraint::open(&sub_storage);
+        constraint.set_target(ctx, target)?;
+        constraint.set_adjustment_window(ctx, adjustment_window)?;
+        constraint.set_backlog(ctx, backlog)?;
+        constraint.set_resource_weights(ctx, weights)
+    }
+
+    // func (ps *L2PricingState) ClearMultiGasConstraints() error
+    pub fn clear_multi_gas_constraints<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error>
+    where
+        B: Clone,
+    {
+        let length = self.multi_gas_constraints_length(ctx.db_mut())?;
+        for _ in 0..length {
+            let sub_storage = self.multi_gas_constraints.pop(ctx)?;
+            let mut constraint = MultiGasConstraint::open(&sub_storage);
+            constraint.clear(ctx)?;
+        }
+        Ok(())
+    }
+
+    // func (ps *L2PricingState) setGasConstraintsFromLegacy() error
+    pub fn set_gas_constraints_from_legacy<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error>
+    where
+        B: Clone,
+    {
+        self.clear_gas_constraints(ctx)?;
+        let target = self.speed_limit_per_second.get(ctx.db_mut())?;
+        let adjustment_window = self.pricing_inertia.get(ctx.db_mut())?;
+        let old_backlog = self.gas_backlog.get(ctx.db_mut())?;
+        let backlog_tolerance = self.backlog_tolerance.get(ctx.db_mut())?;
+        // backlog := arbmath.SaturatingUSub(oldBacklog, arbmath.SaturatingUMul(backlogTolerance, target))
+        let backlog = old_backlog.saturating_sub(backlog_tolerance.saturating_mul(target));
+        self.add_gas_constraint(ctx, target, adjustment_window, backlog)
+    }
+
+    // func (ps *L2PricingState) setMultiGasConstraintsFromSingleGasConstraints() error
+    pub fn set_multi_gas_constraints_from_single_gas_constraints<CTX: ContextTr>(
+        &mut self,
+        ctx: &mut CTX,
+    ) -> Result<(), <<CTX::Journal as JournalTr>::Database as Database>::Error>
+    where
+        B: Clone,
+    {
+        self.clear_multi_gas_constraints(ctx)?;
+        let length = self.gas_constraints_length(ctx.db_mut())?;
+        for i in 0..length {
+            let c = self.open_gas_constraint_at(i);
+            let target = c.target(ctx.db_mut())?;
+            let window = c.adjustment_window(ctx.db_mut())?;
+            let backlog = c.backlog(ctx.db_mut())?;
+            // Transfer to multi-gas constraint with equal weights
+            let weights: HashMap<u8, u64> = [
+                (ResourceKind::Computation as u8, 1u64),
+                (ResourceKind::HistoryGrowth as u8, 1u64),
+                (ResourceKind::StorageAccess as u8, 1u64),
+                (ResourceKind::StorageGrowth as u8, 1u64),
+                (ResourceKind::L2Calldata as u8, 1u64),
+                (ResourceKind::WasmComputation as u8, 1u64),
+            ].into_iter().collect();
+            // var adjustmentWindow uint32
+            // if window > math.MaxUint32 { adjustmentWindow = math.MaxUint32 } else { adjustmentWindow = uint32(window) }
+            let adjustment_window = window.min(u32::MAX as u64) as u32;
+            self.add_multi_gas_constraint(ctx, target, adjustment_window, backlog, &weights)?;
+        }
+        Ok(())
     }
 }
 
