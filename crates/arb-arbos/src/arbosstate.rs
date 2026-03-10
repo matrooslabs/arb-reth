@@ -27,3 +27,15 @@
 // 	Burner                          burn.Burner
 // }
 
+use crate::{
+    burn::Burner, l1pricing::l1pricing::L1PricingState, l2pricing::l2pricing::L2PricingState, storage::storage::{StorageBackedAddress, StorageBackedUint64}
+};
+
+pub struct ArbosState<B: Burner> {
+    arbos_version: u64,
+    upgrade_version: StorageBackedUint64<B>,
+    upgrade_timestamp: StorageBackedUint64<B>,
+    network_fee_account: StorageBackedAddress<B>,
+    l1_pricing_state: L1PricingState<B>,
+    l2_pricing_state: L2PricingState<B>,
+}
