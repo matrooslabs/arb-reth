@@ -8,3 +8,5 @@ revm.workspace = true
 arbitrum.workspace = true
 lru.workspace = true
 alloy-primitives.workspace = true
+brotli.workspace = true
+alloy-rlp.workspace = true

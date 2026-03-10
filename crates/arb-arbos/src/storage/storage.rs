@@ -1650,6 +1650,23 @@ impl<B: Burner> Storage<B> {
         ))
     }
 
+    /// Opens a `StorageBackedInt64` at `offset` within this storage space.
+    ///
+    /// Maps to Go's `Storage.OpenStorageBackedInt64(offset uint64)`.
+    // func (s *Storage) OpenStorageBackedInt64(offset uint64) StorageBackedInt64 {
+    //     return StorageBackedInt64{s.NewSlot(offset)}
+    // }
+    pub fn open_storage_backed_int64(&self, offset: u64) -> StorageBackedInt64<B>
+    where
+        B: Clone,
+    {
+        StorageBackedInt64(StorageSlot::new(
+            self.account,
+            self.map_address(offset),
+            self.burner.clone(),
+        ))
+    }
+
     /// Opens a `StorageBackedAddress` at `offset` within this storage space.
     ///
     /// Maps to Go's `Storage.OpenStorageBackedAddress(offset uint64)`.
